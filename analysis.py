@@ -66,7 +66,7 @@ def calculate_joint_slot_acc(result_path, data_path="data/MULTIWOZ2.1/"):
     for r in res:
         all_correct = True
         for slot in slot_list:
-            pred_val = r[f"pred_value_{slot}"]
+            pred_val = tokenize(r[f"pred_value_{slot}"])
             gt_vals = []
             # for each ground truth value (in mw2.2 there are multiple),
             #   tokenize the given value, tokenize any variations of the value
@@ -116,11 +116,25 @@ def plot_joint_slot_accs_by_experiment(output_dirs):
     plt.show()
 
 
-def analyze_errors(checkpoint_dir):
+def analyze_errors(checkpoint_dir, data_path="data/MULTIWOZ2.1/"):
+    # load predictions file
     result_path = os.path.join(checkpoint_dir, "predictions.json")
     output_path = os.path.join(checkpoint_dir, "error_analysis.json")
     with open(result_path) as f:
         res = json.load(f)
+
+    # load value variations
+    config_file = os.path.join(data_path, "config.json")
+    with open(config_file, "r") as f:
+        raw_config = json.load(f)
+
+    # tokenize value variations and get inverse mapping
+    value_variations = raw_config["label_maps"]
+    tokenized_value_variations = {}
+    for val in value_variations:
+        tokenized_value_variations[tokenize(val)] = [tokenize(v) for v in value_variations[val]]
+    value_variations = tokenized_value_variations
+    inverse_value_variations = {vv: k for k, v in value_variations.items() for vv in v}
 
     analysis = {}
 
@@ -130,17 +144,31 @@ def analyze_errors(checkpoint_dir):
         slot_info = {"incorrect_predictions": []}
         source_scores_by_slot = {source: {"tp": 0, "fp": 0, "tn": 0, "fn": 0} for source in sources}
         for r in res:
-            pred_val = r[f"pred_value_{slot}"]
-            gt_vals = r[f"ground_truth_value_{slot}"]
-            tokenized_gt_vals = []
-            for gt_val in gt_vals:
-                tokenized_gt_vals.append(tokenize(gt_val))
+
+            pred_val = tokenize(r[f"pred_value_{slot}"])
+            gt_vals = set()
+            # for each ground truth value (in mw2.2 there are multiple),
+            #   tokenize the given value, tokenize any variations of the value
+            for gt_val in r[f"ground_truth_value_{slot}"]:
+                tokenized_gt_val = tokenize(gt_val)
+                gt_vals.add(tokenized_gt_val)
+
+                # add any variations
+                if tokenized_gt_val in value_variations:
+                    for val in value_variations[tokenized_gt_val]:
+                        gt_vals.add(val)
+                # add any variations
+                if tokenized_gt_val in inverse_value_variations:
+                    gt_vals.add(inverse_value_variations[tokenized_gt_val])
+                    for val in value_variations[inverse_value_variations[tokenized_gt_val]]:
+                        gt_vals.add(val)
+
             pred_source = r[f"pred_best_source_{slot}"]
             gt_source = r[f"ground_truth_sources_{slot}"]
 
-            if pred_val not in tokenized_gt_vals:
+            if pred_val not in gt_vals:
                 slot_info["incorrect_predictions"].append(
-                    f"{r['guid']} - predicted value {pred_val} (source {pred_source}) | ground truth {tokenized_gt_vals} (source {gt_source}"
+                    f"{r['guid']} - PREDICTED {pred_val} (source {pred_source}) | GROUND TRUTH {gt_vals} (source {gt_source}"
                 )
 
             # calculate tp, fp, fn, tn scores per source
