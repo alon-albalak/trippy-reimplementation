@@ -290,6 +290,7 @@ def convert_examples_to_features(examples, slot_list, model_type, tokenizer, max
         refer_labels = {}
         DB_labels = {}
         for slot in slot_list:
+
             usr_tokens, usr_token_labels = _tokenize_text_and_label(
                 example.usr_utterance_tokens, example.usr_utterance_token_label_dict[slot], tokenizer
             )

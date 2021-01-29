@@ -2,7 +2,7 @@
 from numpy import prod
 import re
 import torch
-from torch.nn import Dropout, Linear, CrossEntropyLoss, BCEWithLogitsLoss, MultiLabelMarginLoss
+from torch.nn import Dropout, Linear, CrossEntropyLoss, BCEWithLogitsLoss
 from transformers import BertModel, BertPreTrainedModel
 
 
@@ -120,18 +120,20 @@ class BERTForDST(BertPreTrainedModel):
             source_loss = torch.sum(self.source_loss_fct(per_slot_source_logits[slot], value_sources[slot]), dim=1)
 
             start_loss = self.token_loss_fct(per_slot_start_logits[slot], start_labels[slot])
-            start_loss = torch.sum(attention_mask * start_loss, dim=1) / torch.sum(attention_mask)
+            start_loss = torch.sum(attention_mask * start_loss, dim=1)  # / torch.sum(attention_mask, dim=1)
             end_loss = self.token_loss_fct(per_slot_end_logits[slot], end_labels[slot])
             end_loss = torch.sum(attention_mask * end_loss, dim=1)
             # check if each sample has at least 1 starting token to determine if any tokens are pointable
             token_is_pointable = (torch.sum(start_labels[slot], dim=1) > 0).float()
-            token_loss = token_is_pointable * (start_loss + end_loss) / 2.0
+            token_loss = token_is_pointable * (start_loss + end_loss)
 
             refer_loss = self.refer_loss_fct(per_slot_refer_logits[slot], refer_labels[slot])
             token_is_referrable = (value_sources[slot][:, self.source_dict["refer"]] == 1).float()
             refer_loss *= token_is_referrable
 
             per_example_loss = (self.source_loss_ratio * source_loss) + ((1 - self.source_loss_ratio) / 2) * (token_loss + refer_loss)
+            # per_example_loss = source_loss + token_loss + refer_loss
+            # ALON NOTE: EQUALLOSSES TRAINING
 
             total_loss += torch.sum(per_example_loss)
             per_slot_per_example_loss[slot] = per_example_loss
@@ -251,12 +253,14 @@ class BERTForDST(BertPreTrainedModel):
 
                 # for any predicted source, add values to the distribution
                 # for any ground truth source, compute accuracy
-                if best_pred_source in ["none", "dontcare", "true", "false"]:
+                if best_pred_source in ["none"]:
+                    # if predict none, then don't alter pred_dialog_state
+                    pass
+                elif best_pred_source in ["dontcare", "true", "false"]:
                     pred_dialog_state[slot] = best_pred_source
                 elif best_pred_source in ["usr_utt", "sys_utt"]:
-                    if pred_start > pred_end:
-                        pred_dialog_state[slot] = "none"
-                    else:
+                    # if pred_start > pred_end, treat it as "none"
+                    if pred_start <= pred_end:
                         input_tokens = tokenizer.convert_ids_to_tokens(input_ids.squeeze())
                         pred_dialog_state[slot] = " ".join(input_tokens[pred_start : pred_end + 1])
                         pred_dialog_state[slot] = re.sub("(^| )##", "", pred_dialog_state[slot])
