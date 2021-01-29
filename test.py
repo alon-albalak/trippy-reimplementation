@@ -44,24 +44,18 @@ def main(**kwargs):
     config_class, model_class, tokenizer_class = utils.utils.MODEL_CLASSES[kwargs["model_type"]]
     config = config_class.from_pretrained(model_path)
 
-    config.slot_list = kwargs["slot_list"]
-    config.sources = kwargs["sources"]
-    config.bert_dropout_rate = kwargs["bert_dropout_rate"]
-    config.source_loss_ratio = kwargs["source_loss_ratio"]
-
     tokenizer = tokenizer_class.from_pretrained(kwargs["model_name_or_path"], do_lower_case=kwargs["do_lower_case"])
 
-    model = model_class.from_pretrained(model_path, config=config)
+    model = model_class.from_pretrained(model_path)
     model.to(kwargs["device"])
     model.eval()
 
-
-    if kwargs['validation']:
-        kwargs['dataset_type'] = 'val'
-    if kwargs['test']:
-        kwargs['dataset_type'] = 'test'
+    if kwargs["validation"]:
+        kwargs["dataset_type"] = "val"
+    if kwargs["test"]:
+        kwargs["dataset_type"] = "test"
     if kwargs["debugging"]:
-        kwargs["dataset_type"] = "train_debugging"
+        kwargs["dataset_type"] = "debugging"
 
     test_dataset, test_features = get_data(**kwargs)
     # batch_size always set to 1 to handle sequential nature of dialogue
