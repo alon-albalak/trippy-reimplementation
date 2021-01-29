@@ -69,8 +69,8 @@ def parse_args():
     parser.add_argument("--fp16", action="store_true")
     parser.add_argument("--adam_epsilon", type=float, default=1e-6)
     parser.add_argument("--source_loss_ratio", type=float, default=0.8)
-    parser.add_argument("--eval_during_training", action="store_true")
-    parser.add_argument("--save_model_checkpoints", action="store_true")
+    parser.add_argument("--eval_during_training", type=bool, default=True)
+    parser.add_argument("--save_model_checkpoints", type=bool, default=True)
     parser.add_argument("--calculate_accs", action="store_true")
     parser.add_argument("--downweight_none_slot", type=float, default=1.0)
 
