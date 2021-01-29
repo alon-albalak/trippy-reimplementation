@@ -61,7 +61,7 @@ def main(**kwargs):
 
     # load dataset into dataloader
     if kwargs["debugging"]:
-        kwargs["dataset_type"] = "train_debugging"
+        kwargs["dataset_type"] = "debugging"
     else:
         kwargs["dataset_type"] = "train"
     train_dataset, train_features = get_data(**kwargs)
@@ -151,8 +151,8 @@ def main(**kwargs):
                 scaler.scale(loss).backward()
 
                 if ((step + 1) % gradient_accumulation_steps) == 0:
-                    # scaler.unscale_(optimizer)
-                    # torch.nn.utils.clip_grad_norm_(model.parameters(), kwargs["max_grad_norm"])
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), kwargs["max_grad_norm"])
                     scaler.step(optimizer)
                     scaler.update()
                     scheduler.step()
@@ -198,6 +198,14 @@ def main(**kwargs):
             if kwargs["calculate_accs"]:
                 desc += f" === source acc {source_acc*100:0.2f} === start acc {start_acc*100:0.2f} === end acc {end_acc*100:0.2f} === refer acc {refer_acc*100:0.2f}"
             pbar.set_description(desc)
+
+        # # save model checkpoints
+        if kwargs["save_model_checkpoints"]:
+            output_dir = os.path.join(kwargs["output_dir"], f"checkpoint-{epoch+1}")
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+            model.save_pretrained(output_dir)
+            logger.info(f"    Saving model checkpoint to {output_dir}")
 
         if kwargs["eval_during_training"]:
             predictions = []
@@ -284,14 +292,7 @@ def main(**kwargs):
             joint_correct, joint_total = utils.utils.calculate_joint_slot_acc(output_prediction_file)
             joint_slot_acc = joint_correct / joint_total
             logger.info(f"    Joint Slot Accuracy - checkpoint-{epoch+1} - {joint_slot_acc:0.3f}")
-
-        # # save model checkpoints
-        if kwargs["save_model_checkpoints"]:
-            output_dir = os.path.join(kwargs["output_dir"], f"checkpoint-{epoch+1}")
-            if not os.path.exists(output_dir):
-                os.makedirs(output_dir)
-            model.save_pretrained(output_dir)
-            logger.info(f"    Saving model checkpoint to {output_dir}")
+            os.rename(output_dir, f"{output_dir}-{joint_slot_acc:0.3f}")
 
 
 if __name__ == "__main__":
