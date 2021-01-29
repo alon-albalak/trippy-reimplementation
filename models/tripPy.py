@@ -131,8 +131,8 @@ class BERTForDST(BertPreTrainedModel):
             token_is_referrable = (value_sources[slot][:, self.source_dict["refer"]] == 1).float()
             refer_loss *= token_is_referrable
 
-            per_example_loss = (self.source_loss_ratio * source_loss) + ((1 - self.source_loss_ratio) / 2) * (token_loss + refer_loss)
-            # per_example_loss = source_loss + token_loss + refer_loss
+            # per_example_loss = (self.source_loss_ratio * source_loss) + ((1 - self.source_loss_ratio) / 2) * (token_loss + refer_loss)
+            per_example_loss = source_loss + token_loss + refer_loss
             # ALON NOTE: EQUALLOSSES TRAINING
 
             total_loss += torch.sum(per_example_loss)
@@ -186,42 +186,52 @@ class BERTForDST(BertPreTrainedModel):
         inform_slot_labels,  # dict of {slot: 0/1} where the label is 1 if the slot was informed by the system
         refer_labels,
         DB_labels,
-        compute_full_value_distribution,
+        softgate,
     ):
         """Method which calculates statistics for evaluation
         such as source accuracy, token accuracy, refer accuracy
         slot accuracy
         """
-        accuracies = {
-            "source_acc": {slot: 0 for slot in self.slot_list},
-            "token_acc": {slot: 0 for slot in self.slot_list},
-            "refer_acc": {slot: 0 for slot in self.slot_list},
-        }
-        sample_info = {"guid": guid}
 
-        outputs = self.forward(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            segment_ids=segment_ids,
-            dialog_states=dialog_state,
-            inform_slot_labels=inform_slot_labels,
-        )
-        per_slot_source_logits, per_slot_start_logits, per_slot_end_logits, per_slot_refer_logits = outputs
+        # if using a soft gating mechanism, pass the calculation off to the another function
+        if softgate:
+            accuracies, pred_dialog_state, sample_info = evaluate_softgate(
+                tokenizer,
+                guid,
+                input_ids,
+                attention_mask,
+                segment_ids,
+                start_labels,
+                end_labels,
+                seen_values,
+                values,
+                value_sources,
+                dialog_state,
+                pred_dialog_state,
+                inform_values,
+                inform_slot_labels,
+                refer_labels,
+                DB_labels,
+            )
 
-        for slot in self.slot_list:
-            if compute_full_value_distribution:
-                # predict sources
-                pred_source_idx = torch.round(torch.sigmoid(per_slot_source_logits[slot]))
-                pred_source = self.sources[pred_source_idx]
-                # create an empty list for predicted value token distribution
-                value_token_distribution = []
-                # for any predicted source, add values to the distribution
-                # for any ground truth source, compute accuracy
-                if pred_source == "none":
-                    pass
-                pass
+        else:
+            accuracies = {
+                "source_acc": {slot: 0 for slot in self.slot_list},
+                "token_acc": {slot: 0 for slot in self.slot_list},
+                "refer_acc": {slot: 0 for slot in self.slot_list},
+            }
+            sample_info = {"guid": guid}
 
-            else:
+            outputs = self.forward(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                segment_ids=segment_ids,
+                dialog_states=dialog_state,
+                inform_slot_labels=inform_slot_labels,
+            )
+            per_slot_source_logits, per_slot_start_logits, per_slot_end_logits, per_slot_refer_logits = outputs
+
+            for slot in self.slot_list:
                 # for dialogue state, predict sources (may be multiple), to be passed to next turn?
                 pred_sources_for_DS = torch.round(torch.sigmoid(per_slot_source_logits[slot]))
                 # pred_value_sources[slot] = pred_sources_for_DS
@@ -264,46 +274,109 @@ class BERTForDST(BertPreTrainedModel):
                         input_tokens = tokenizer.convert_ids_to_tokens(input_ids.squeeze())
                         pred_dialog_state[slot] = " ".join(input_tokens[pred_start : pred_end + 1])
                         pred_dialog_state[slot] = re.sub("(^| )##", "", pred_dialog_state[slot])
-                # ALON TODO: inform_slot_labels only has binary label for if this slot is informed
-                #       We need to get the values from someewhere
+
                 elif best_pred_source == "inform":
                     pred_dialog_state[slot] = inform_values[slot][0]
 
-        # to properly use the refer slot, we need a second pass through slots after all others have been filled
-        for slot in self.slot_list:
-            if compute_full_value_distribution:
-                pass
-            else:
+            # to properly use the refer slot, we need a second pass through slots after all others have been filled
+            for slot in self.slot_list:
+
                 best_pred_source_idx = torch.argmax(per_slot_source_logits[slot])
                 best_pred_source = self.sources[best_pred_source_idx]
                 if best_pred_source == "refer":
                     pred_refer = torch.argmax(per_slot_refer_logits[slot])
-                    pred_dialog_state[slot] = seen_values[self.slot_list[int(pred_refer) - 1]][0]
+                    pred_dialog_state[slot] = pred_dialog_state[self.slot_list[int(pred_refer) - 1]][0]
 
-            # add predicted values and ground truth values to sample info
-            sample_info[f"pred_value_{slot}"] = pred_dialog_state[slot]
-            sample_info[f"ground_truth_value_{slot}"] = values[slot]
+                # add predicted values and ground truth values to sample info
+                sample_info[f"pred_value_{slot}"] = pred_dialog_state[slot]
+                sample_info[f"ground_truth_value_{slot}"] = values[slot]
 
-            # TODO: check that these are actually correct
-            # Compute accuracies
-            token_is_pointable = (torch.sum(start_labels[slot], dim=1) > 0).float()
-            token_is_referrable = (value_sources[slot][:, self.source_dict["refer"]] == 1).float()
-            pred_sources = torch.round(torch.sigmoid(per_slot_source_logits[slot]))
-            accuracies["source_acc"][slot] = torch.sum(value_sources[slot] == pred_sources) / prod(pred_sources.shape)
+                # TODO: check that these are actually correct
+                # Compute accuracies
+                # token_is_pointable = (torch.sum(start_labels[slot], dim=1) > 0).float()
+                # token_is_referrable = (value_sources[slot][:, self.source_dict["refer"]] == 1).float()
+                # pred_sources = torch.round(torch.sigmoid(per_slot_source_logits[slot]))
+                # accuracies["source_acc"][slot] = torch.sum(value_sources[slot] == pred_sources) / prod(pred_sources.shape)
 
-            if token_is_pointable:
-                pred_start = torch.round(torch.sigmoid(per_slot_start_logits[slot]))
-                pred_end = torch.round(torch.sigmoid(per_slot_end_logits[slot]))
-                accuracies["token_acc"][slot] = (
-                    torch.sum(token_is_pointable * (start_labels[slot] == pred_start))
-                    + torch.sum(token_is_pointable * (end_labels[slot] == pred_end))
-                ) / (2 * prod(pred_start.shape))
-            else:
-                accuracies["token_acc"][slot] = "unpointable"
-            if token_is_referrable:
-                pred_refer = torch.round(torch.sigmoid(per_slot_refer_logits[slot]))
-                accuracies["refer_acc"][slot] = torch.sum(token_is_referrable * (refer_labels[slot] == pred_refer)) / (prod(pred_refer.shape))
-            else:
-                accuracies["refer_acc"][slot] = "unreferrable"
+                # if token_is_pointable:
+                #     pred_start = torch.round(torch.sigmoid(per_slot_start_logits[slot]))
+                #     pred_end = torch.round(torch.sigmoid(per_slot_end_logits[slot]))
+                #     accuracies["token_acc"][slot] = (
+                #         torch.sum(token_is_pointable * (start_labels[slot] == pred_start))
+                #         + torch.sum(token_is_pointable * (end_labels[slot] == pred_end))
+                #     ) / (2 * prod(pred_start.shape))
+                # else:
+                #     accuracies["token_acc"][slot] = "unpointable"
+                # if token_is_referrable:
+                #     pred_refer = torch.round(torch.sigmoid(per_slot_refer_logits[slot]))
+                #     accuracies["refer_acc"][slot] = torch.sum(token_is_referrable * (refer_labels[slot] == pred_refer)) / (prod(pred_refer.shape))
+                # else:
+                #     accuracies["refer_acc"][slot] = "unreferrable"
+
+        return accuracies, pred_dialog_state, sample_info
+
+    def evaluate_softgate(
+        self,
+        tokenizer,
+        guid,
+        input_ids,
+        attention_mask,
+        segment_ids,
+        start_labels,
+        end_labels,
+        seen_values,  # ground truth list of values (not including current turn)
+        values,  # ground truth list of values (including this and all previous turns)
+        value_sources,  # ground truth dialog state of the current turn (includes all previous turns)
+        dialog_state,  # ground truth dialog state from previous turn
+        pred_dialog_state,  # predicted dialog state from previous turn
+        inform_values,  # dict of {slot: ground truth value} for values which were informed by the system
+        inform_slot_labels,  # dict of {slot: 0/1} where the label is 1 if the slot was informed by the system
+        refer_labels,
+        DB_labels,
+        softgate,
+    ):
+        """Method which calculates statistics for evaluation
+        such as source accuracy, token accuracy, refer accuracy
+        slot accuracy
+        """
+
+        accuracies = {
+            "source_acc": {slot: 0 for slot in self.slot_list},
+            "token_acc": {slot: 0 for slot in self.slot_list},
+            "refer_acc": {slot: 0 for slot in self.slot_list},
+        }
+        sample_info = {"guid": guid}
+
+        outputs = self.forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            segment_ids=segment_ids,
+            dialog_states=dialog_state,
+            inform_slot_labels=inform_slot_labels,
+        )
+        per_slot_source_logits, per_slot_start_logits, per_slot_end_logits, per_slot_refer_logits = outputs
+
+        # ALON TODO: QUESTIONS:
+
+        #   Question, how do we handle refer?
+        #       Calculate all values first, then come back after for a second pass including the refer source?
+
+        #   Should we use topk for sources as well as for values? Since we assume that a single value probably doesn't come from > 3 sources. EVER.
+
+        for slot in self.slot_list:
+            # ALON TODO Per slot outline:
+            #   1. Get ground truth source and value
+            ground_truth_source_idxs = torch.nonzero(value_sources[slot].squeeze() == 1)
+            ground_truth_sources = []
+            for idx in ground_truth_source_idxs:
+                ground_truth_sources.append(self.sources[idx])
+            sample_info[f"ground_truth_sources_{slot}"] = ground_truth_sources
+
+
+        #   2. Get predicted probability distribution over sources
+        #   2. For each source - get probability distribution of each value
+        #           can use torch.topk to only take top k values from each source
+        #           2 options, if using topk, the best use of softmax would be to get topk on logits, and then softmax over those top k values
+        #   3. Combine probability distributions
 
         return accuracies, pred_dialog_state, sample_info
