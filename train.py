@@ -239,47 +239,25 @@ def main(**kwargs):
                         pred_dialog_state[slot] = "none"
 
                 with torch.no_grad():
-                    if kwargs["fp16"]:
-                        with autocast():
-                            accuracies, pred_dialog_state, sample_info = model.evaluate(
-                                tokenizer,
-                                guid,
-                                input_ids,
-                                attention_mask,
-                                segment_ids,
-                                start_labels,
-                                end_labels,
-                                seen_values,
-                                values,
-                                value_sources,
-                                dialog_states,
-                                pred_dialog_state,
-                                inform_values,
-                                inform_slot_labels,
-                                refer_labels,
-                                DB_labels,
-                                kwargs["compute_full_value_distribution"],
-                            )
-                    else:
-                        accuracies, pred_dialog_state, sample_info = model.evaluate(
-                            tokenizer,
-                            guid,
-                            input_ids,
-                            attention_mask,
-                            segment_ids,
-                            start_labels,
-                            end_labels,
-                            seen_values,
-                            values,
-                            value_sources,
-                            dialog_states,
-                            pred_dialog_state,
-                            inform_values,
-                            inform_slot_labels,
-                            refer_labels,
-                            DB_labels,
-                            kwargs["compute_full_value_distribution"],
-                        )
+                    accuracies, pred_dialog_state, sample_info = model.evaluate(
+                        tokenizer,
+                        guid,
+                        input_ids,
+                        attention_mask,
+                        segment_ids,
+                        start_labels,
+                        end_labels,
+                        seen_values,
+                        values,
+                        value_sources,
+                        dialog_states,
+                        pred_dialog_state,
+                        inform_values,
+                        inform_slot_labels,
+                        refer_labels,
+                        DB_labels,
+                        kwargs["softgate"],
+                    )
                 predictions.append(sample_info)
                 # pbar.set_description(
                 #     f"VAL Loss: {total_loss/(step+1):0.4f} === src loss: {total_source_loss/(step+1):0.4f} === token loss: {total_token_loss/(step+1):0.4f} === refer loss: {total_refer_loss/(step+1):0.4f}"

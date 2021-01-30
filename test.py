@@ -108,7 +108,7 @@ def main(**kwargs):
                 inform_slot_labels,
                 refer_labels,
                 DB_labels,
-                kwargs["compute_full_value_distribution"],
+                kwargs["softgate"],
             )
         predictions.append(sample_info)
 

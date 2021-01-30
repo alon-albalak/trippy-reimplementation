@@ -63,7 +63,7 @@ def parse_args():
     parser.add_argument("-e", "--num_epochs", type=int, default=10)
     parser.add_argument("--effective_batch_size", type=int, default=70)
     parser.add_argument("--gpu_batch_size", type=int, default=35)
-    parser.add_argument("-lr", "--learning_rate", type=float, default=1e-4)
+    parser.add_argument("-lr", "--learning_rate", type=float, default=3e-4)
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
     parser.add_argument("--warmup_proportion", type=float, default=0.1)
     parser.add_argument("--fp16", action="store_true")
@@ -77,7 +77,7 @@ def parse_args():
     # testing args
     parser.add_argument("--eval_name", type=str, help="name of model to be evaluated")
     parser.add_argument(
-        "--compute_full_value_distribution",
+        "--softgate",
         action="store_true",
         help="If set to true, during evaluation the model will compute a distribution over all values \
                             from all sources, otherwise the model computes values only over the source with highest probability",
