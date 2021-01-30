@@ -132,7 +132,8 @@ class BERTForDST(BertPreTrainedModel):
             refer_loss *= token_is_referrable
 
             # per_example_loss = (self.source_loss_ratio * source_loss) + ((1 - self.source_loss_ratio) / 2) * (token_loss + refer_loss)
-            per_example_loss = source_loss + token_loss + refer_loss
+            per_example_loss = source_loss + (0.7 * token_loss) + (0.5 * refer_loss)
+            # per_example_loss = source_loss + token_loss + refer_loss
             # ALON NOTE: EQUALLOSSES TRAINING
 
             total_loss += torch.sum(per_example_loss)
@@ -195,7 +196,7 @@ class BERTForDST(BertPreTrainedModel):
 
         # if using a soft gating mechanism, pass the calculation off to the another function
         if softgate:
-            accuracies, pred_dialog_state, sample_info = evaluate_softgate(
+            accuracies, pred_dialog_state, sample_info = self.evaluate_softgate(
                 tokenizer,
                 guid,
                 input_ids,
@@ -272,8 +273,10 @@ class BERTForDST(BertPreTrainedModel):
                     # if pred_start > pred_end, treat it as "none"
                     if pred_start <= pred_end:
                         input_tokens = tokenizer.convert_ids_to_tokens(input_ids.squeeze())
-                        pred_dialog_state[slot] = " ".join(input_tokens[pred_start : pred_end + 1])
-                        pred_dialog_state[slot] = re.sub("(^| )##", "", pred_dialog_state[slot])
+                        # Alon TODO: Confirm that both methods below give same output
+                        # pred_dialog_state[slot] = " ".join(input_tokens[pred_start : pred_end + 1])
+                        # pred_dialog_state[slot] = re.sub("(^| )##", "", pred_dialog_state[slot])
+                        pred_dialog_state[slot] = tokenizer.decode(input_tokens[pred_start : pred_end + 1])
 
                 elif best_pred_source == "inform":
                     pred_dialog_state[slot] = inform_values[slot][0]
@@ -333,7 +336,11 @@ class BERTForDST(BertPreTrainedModel):
         inform_slot_labels,  # dict of {slot: 0/1} where the label is 1 if the slot was informed by the system
         refer_labels,
         DB_labels,
-        softgate,
+        source_topk=3,
+        token_topk=3,
+        refer_topk=2,
+        DB_topk=3,
+        gate_probability_lower_bound=1e-2,
     ):
         """Method which calculates statistics for evaluation
         such as source accuracy, token accuracy, refer accuracy
@@ -364,6 +371,8 @@ class BERTForDST(BertPreTrainedModel):
         #   Should we use topk for sources as well as for values? Since we assume that a single value probably doesn't come from > 3 sources. EVER.
 
         for slot in self.slot_list:
+            value_prediction_distribution = {}
+
             # ALON TODO Per slot outline:
             #   1. Get ground truth source and value
             ground_truth_source_idxs = torch.nonzero(value_sources[slot].squeeze() == 1)
@@ -372,11 +381,81 @@ class BERTForDST(BertPreTrainedModel):
                 ground_truth_sources.append(self.sources[idx])
             sample_info[f"ground_truth_sources_{slot}"] = ground_truth_sources
 
+            #   2. Get predicted probability distribution over sources
 
-        #   2. Get predicted probability distribution over sources
-        #   2. For each source - get probability distribution of each value
-        #           can use torch.topk to only take top k values from each source
-        #           2 options, if using topk, the best use of softmax would be to get topk on logits, and then softmax over those top k values
-        #   3. Combine probability distributions
+            # if only selecting top k sources, get their logits and compute softmax
+            if source_topk:
+                # first get top sources, then compute softmax on remaining sources
+                source_logits, source_idxs = torch.topk(per_slot_source_logits[slot].squeeze(), k=source_topk)
+                source_weights = torch.nn.functional.softmax(source_logits, dim=0)
+                pred_sources = [
+                    (self.sources[idx], weight) for idx, weight in zip(source_idxs, source_weights) if weight > gate_probability_lower_bound
+                ]
+                a = 1
+            else:
+                source_weights = torch.nn.functional.softmax(per_slot_source_logits[slot].squeeze(), dim=0)
+                pred_sources = [(self.sources[idx], weight) for idx, weight in enumerate(source_weights) if weight > gate_probability_lower_bound]
+                a = 1
+
+            #   2. For each source - get probability distribution of each value
+            #           2 options, if using topk, the best use of softmax would be to get topk on logits, and then softmax over those top k values
+
+            for source, source_weight in pred_sources:
+                # add binary sources
+                if source in ["none", "dontcare", "true", "false"]:
+                    if source not in value_prediction_distribution:
+                        value_prediction_distribution[source] = 0
+                    value_prediction_distribution["source"] += source_weight
+
+                # ALON NOTE: This is a pretty significant issue
+                # because we calculate token probabilities over the whole context, we can't really split usr vs sys vs previous turn utterances
+                elif source in ["usr_utt", "sys_utt"]:
+                    utterance_value_distribution = {}
+                    start_logits, start_idxs = torch.topk(per_slot_start_logits[slot].squeeze(), k=token_topk)
+                    end_logits, end_idxs = torch.topk(per_slot_end_logits[slot].squeeze(), k=token_topk)
+
+                    # calculate distribution over all k^2 combinations of start and end tokens
+                    for start_logit, start_idx in zip(start_logits, start_idxs):
+                        for end_logit, end_idx in zip(end_logits, end_idxs):
+                            # ignore pairs where the predicted start is after the end
+                            if start_idx <= end_idx:
+                                pred_value = tokenizer.decode(input_ids[start_idx : end_idx + 1])
+                                if pred_value not in utterance_value_distribution:
+                                    utterance_value_distribution[pred_value] = 0
+                                utterance_value_distribution[pred_value] += start_logit + end_logit
+
+                    # convert utterance_value_distribution into tensor to compute softmax
+                    values = []
+                    logits = []
+                    for val, logit in utterance_value_distribution.items():
+                        values.append(val)
+                        logits.append(logit)
+                    logits = torch.tensor(logits)
+                    value_weights = torch.nn.functional.softmax(logits, dim=0)
+                    for val, val_weight in zip(values, value_weights):
+                        if val not in value_prediction_distribution:
+                            value_prediction_distribution[val] = 0
+                        value_prediction_distribution[val] += source_weight * val_weight
+
+                elif source == "inform":
+                    value = inform_values[slot][0]
+                    if value not in value_prediction_distribution:
+                        value_prediction_distribution[value] = 0
+                    value_prediction_distribution[value] += source_weight
+
+                # ALON TODO: Not totally sure how to handle this
+                #       because we normally would wait until a full pass through the predictions to decide what value belongs to the refer
+                #
+                #       Is it possible to include all referred slots, and use them as a placeholder?
+                #       Can we simply reduce this case to binary? If source_weight > 0.5, just go with the refer value_prediction_distribution
+
+                #   BEST OPTION:
+                #       Maybe we temporarily leave this one, flag the dict somehow, and then only finish computing total value in next pass
+                #           This is only possible if we never have a dual slot referral( slot a refers to slot b, and slot b refers to slot c)
+                #           Perhaps in this referception, we simply leave a pointer to which slot we refer to, and then calculate them in the appropriate order later
+                elif source == "refer":
+                    pass
+
+            #   3. Combine probability distributions
 
         return accuracies, pred_dialog_state, sample_info
