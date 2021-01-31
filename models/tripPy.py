@@ -347,7 +347,7 @@ class BERTForDST(BertPreTrainedModel):
             for start_logit, start_idx in zip(start_logits, start_idxs):
                 for end_logit, end_idx in zip(end_logits, end_idxs):
                     # ignore pairs where the predicted start is after the end
-                    if start_idx <= end_idx and end_idx - start_idx <= 6:
+                    if start_idx <= end_idx and end_idx - start_idx <= 10:
                         pred_value = " ".join(input_tokens[start_idx : end_idx + 1])
                         pred_value = re.sub("(^| )##", "", pred_value)
                         if pred_value not in utterance_value_distribution:
@@ -510,6 +510,9 @@ class BERTForDST(BertPreTrainedModel):
             #   3. Combine probability distributions
             #   actually, just get the value with highest probability
             highest_prob = 0
+            pred_val = "none"
+            if not value_prediction_distribution:
+                print(f"NO VALUE PREDICTIONS: guid - {guid} - {slot} - pred sources - {pred_sources}")
             for val, prob in value_prediction_distribution.items():
                 if prob > highest_prob:
                     pred_val = val
