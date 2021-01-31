@@ -163,23 +163,23 @@ def analyze_errors(checkpoint_dir, data_path="data/MULTIWOZ2.1/"):
                     for val in value_variations[inverse_value_variations[tokenized_gt_val]]:
                         gt_vals.add(val)
 
-            pred_source = r[f"pred_best_source_{slot}"]
+            pred_sources = r[f"pred_sources_{slot}"]
             gt_source = r[f"ground_truth_sources_{slot}"]
 
             if pred_val not in gt_vals:
                 slot_info["incorrect_predictions"].append(
-                    f"{r['guid']} - PREDICTED {pred_val} (source {pred_source}) | GROUND TRUTH {gt_vals} (source {gt_source}"
+                    f"{r['guid']} - PREDICTED {pred_val} (source {pred_sources}) | GROUND TRUTH {gt_vals} (source {gt_source}"
                 )
 
             # calculate tp, fp, fn, tn scores per source
             for source in sources:
                 if source in gt_source:
-                    if source in pred_source:
+                    if source in pred_sources:
                         source_scores_by_slot[source]["tp"] += 1
                     else:
                         source_scores_by_slot[source]["fn"] += 1
                 else:
-                    if source in pred_source:
+                    if source in pred_sources:
                         source_scores_by_slot[source]["fp"] += 1
                     else:
                         source_scores_by_slot[source]["tn"] += 1
@@ -187,7 +187,7 @@ def analyze_errors(checkpoint_dir, data_path="data/MULTIWOZ2.1/"):
             # calculate overall source accuracy
             for source in gt_source:
                 overall_source_scores[source]["total"] += 1
-                if source == pred_source:
+                if source in pred_sources:
                     overall_source_scores[source]["correct"] += 1
 
         slot_info["source_performance_by_slot"] = source_scores_by_slot

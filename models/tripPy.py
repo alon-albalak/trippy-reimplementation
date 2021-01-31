@@ -131,8 +131,8 @@ class BERTForDST(BertPreTrainedModel):
             token_is_referrable = (value_sources[slot][:, self.source_dict["refer"]] == 1).float()
             refer_loss *= token_is_referrable
 
-            # per_example_loss = (self.source_loss_ratio * source_loss) + ((1 - self.source_loss_ratio) / 2) * (token_loss + refer_loss)
-            per_example_loss = source_loss + (0.7 * token_loss) + (0.5 * refer_loss)
+            per_example_loss = (self.source_loss_ratio * source_loss) + ((1 - self.source_loss_ratio) / 2) * (token_loss + refer_loss)
+            # per_example_loss = source_loss + (0.7 * token_loss) + (0.5 * refer_loss)
             # per_example_loss = source_loss + token_loss + refer_loss
             # ALON NOTE: EQUALLOSSES TRAINING
 
@@ -240,7 +240,7 @@ class BERTForDST(BertPreTrainedModel):
                 # for value prediction, predict a single source
                 best_pred_source_idx = torch.argmax(per_slot_source_logits[slot])
                 best_pred_source = self.sources[best_pred_source_idx]
-                sample_info[f"pred_best_source_{slot}"] = best_pred_source
+                sample_info[f"pred_sources_{slot}"] = best_pred_source
 
                 pred_start = torch.argmax(per_slot_start_logits[slot])
                 pred_end = torch.argmax(per_slot_end_logits[slot])
@@ -317,7 +317,17 @@ class BERTForDST(BertPreTrainedModel):
         return accuracies, pred_dialog_state, sample_info
 
     def calculate_source_values(
-        self, source, source_weight, value_prediction_distribution, logits=None, topk=None, tokenizer=None, input_ids=None, inform_values=None
+        self,
+        source,
+        source_weight,
+        value_prediction_distribution,
+        logits=None,
+        topk=None,
+        tokenizer=None,
+        input_ids=None,
+        inform_values=None,
+        refer_preds=None,
+        pred_dialog_state=None,
     ):
         # add binary sources
         if source in ["none", "dontcare", "true", "false"]:
@@ -340,7 +350,6 @@ class BERTForDST(BertPreTrainedModel):
                     if start_idx <= end_idx:
                         pred_value = " ".join(input_tokens[start_idx : end_idx + 1])
                         pred_value = re.sub("(^| )##", "", pred_value)
-                        # pred_value = tokenizer.decode(input_ids[start_idx : end_idx + 1])
                         if pred_value not in utterance_value_distribution:
                             utterance_value_distribution[pred_value] = 0
                         utterance_value_distribution[pred_value] += start_logit + end_logit
@@ -354,6 +363,7 @@ class BERTForDST(BertPreTrainedModel):
             logits = torch.tensor(logits)
             value_weights = torch.nn.functional.softmax(logits, dim=0)
             for val, val_weight in zip(values, value_weights):
+                # if val_weight > gate_probability_lower_bound:
                 if val not in value_prediction_distribution:
                     value_prediction_distribution[val] = 0
                 value_prediction_distribution[val] += source_weight * val_weight
@@ -377,7 +387,14 @@ class BERTForDST(BertPreTrainedModel):
         # final idea: save a dict of slots which refer to other slots (like pointers)
         #       after first pass through this go through dict, and calculate values
         elif source == "refer":
-            pass
+            for slot, refer_weight in refer_preds.items():
+                if slot == "none":
+                    referred_value = "none"
+                else:
+                    referred_value = pred_dialog_state[slot]
+                if referred_value not in value_prediction_distribution:
+                    value_prediction_distribution[referred_value] = 0
+                value_prediction_distribution[referred_value] += source_weight * refer_weight
 
         return value_prediction_distribution
 
@@ -444,6 +461,7 @@ class BERTForDST(BertPreTrainedModel):
             for idx in ground_truth_source_idxs:
                 ground_truth_sources.append(self.sources[idx])
             sample_info[f"ground_truth_sources_{slot}"] = ground_truth_sources
+            sample_info[f"ground_truth_value_{slot}"] = values[slot]
 
             #   2. Get predicted probability distribution over sources
 
@@ -464,7 +482,7 @@ class BERTForDST(BertPreTrainedModel):
             #   2. For each source - get probability distribution of each value
             #           2 options, if using topk, the best use of softmax would be to get topk on logits, and then softmax over those top k values
 
-            if "refer" in pred_sources:
+            if "refer" in [s[0] for s in pred_sources]:
                 # calculate which slot this refers to, save in dict, along with pred sources, weights
                 refer_logits, refer_idxs = torch.topk(per_slot_refer_logits[slot].squeeze(), k=refer_topk)
                 refer_weights = torch.nn.functional.softmax(refer_logits, dim=0)
@@ -474,6 +492,7 @@ class BERTForDST(BertPreTrainedModel):
                 continue
 
             value_prediction_distribution = {}
+
             for source, source_weight in pred_sources:
                 kwargs = {}
                 if source in ["usr_utt", "sys_utt"]:
@@ -484,23 +503,62 @@ class BERTForDST(BertPreTrainedModel):
                         "topk": token_topk,
                     }
                 elif source == "inform":
-                    kwargs = {"logits": inform_values[slot]}
+                    kwargs = {"inform_values": inform_values[slot]}
 
                 value_prediction_distribution = self.calculate_source_values(source, source_weight, value_prediction_distribution, **kwargs)
-            # Combine probability distributions for this slot
+
+            #   3. Combine probability distributions
+            #   actually, just get the value with highest probability
             highest_prob = 0
             for val, prob in value_prediction_distribution.items():
                 if prob > highest_prob:
                     pred_val = val
                     highest_prob = prob
 
-            a = 1
+            if pred_val != "none":
+                pred_dialog_state[slot] = pred_val
+            sample_info[f"pred_value_{slot}"] = pred_dialog_state[slot]
+            sample_info[f"pred_sources_{slot}"] = [pred[0] for pred in pred_sources]
 
         # return for the slots which have referral source
+        # Although conceptually impossible, it is possible that annotationg suggest that 2 slots refer to each other, if this is the case, break the tie arbitrarily
         while referred_slots:
+            used_slots = []
             for slot in referred_slots:
-                break
+                if any(referred_slots[slot]["refer_preds"]) in referred_slots:
+                    continue
+                value_prediction_distribution = {}
+                for source, source_weight in referred_slots[slot]["pred_sources"].items():
+                    kwargs = {}
+                    if source in ["usr_utt", "sys_utt"]:
+                        kwargs = {
+                            "input_ids": input_ids,
+                            "logits": [per_slot_start_logits[slot], per_slot_end_logits[slot]],
+                            "tokenizer": tokenizer,
+                            "topk": token_topk,
+                        }
+                    elif source == "inform":
+                        kwargs = {"inform_values": inform_values[slot]}
 
-            #   3. Combine probability distributions
+                    elif source == "refer":
+                        kwargs = {"refer_preds": referred_slots[slot]["refer_preds"], "pred_dialog_state": pred_dialog_state}
+
+                    value_prediction_distribution = self.calculate_source_values(source, source_weight, value_prediction_distribution, **kwargs)
+
+                # Combine probability distributions for this slot
+                highest_prob = 0
+                for val, prob in value_prediction_distribution.items():
+                    if prob > highest_prob:
+                        pred_val = val
+                        highest_prob = prob
+
+                if pred_val != "none":
+                    pred_dialog_state[slot] = pred_val
+                sample_info[f"pred_value_{slot}"] = pred_dialog_state[slot]
+                sample_info[f"pred_sources_{slot}"] = [pred for pred in referred_slots[slot]["pred_sources"]]
+
+                used_slots.append(slot)
+            for slot in used_slots:
+                del referred_slots[slot]
 
         return accuracies, pred_dialog_state, sample_info
