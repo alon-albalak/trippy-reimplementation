@@ -4,6 +4,7 @@ import json
 from tqdm import tqdm
 
 import utils.utils
+from analysis import calculate_joint_slot_acc
 from create_data import get_data
 
 import torch
@@ -112,9 +113,11 @@ def main(**kwargs):
             )
         predictions.append(sample_info)
 
-    output_predictions_file = os.path.join(model_path, "predictions.json")
+    output_predictions_file = os.path.join(model_path, f"{kwargs['dataset_type']}_predictions.json")
     with open(output_predictions_file, "w") as f:
         json.dump(predictions, f, indent=2)
+    joint_correct, joint_total = calculate_joint_slot_acc(output_predictions_file)
+    logger.info(f"    Test joint slot accuracy: {joint_correct/joint_total} - {output_predictions_file}")
 
 
 if __name__ == "__main__":

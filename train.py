@@ -265,7 +265,7 @@ def main(**kwargs):
             output_dir = os.path.join(kwargs["output_dir"], f"checkpoint-{epoch+1}")
             if not os.path.exists(output_dir):
                 os.makedirs(output_dir)
-            output_prediction_file = os.path.join(output_dir, "predictions.json")
+            output_prediction_file = os.path.join(output_dir, "val_predictions.json")
             with open(output_prediction_file, "w") as f:
                 json.dump(predictions, f, indent=2)
             joint_correct, joint_total = calculate_joint_slot_acc(output_prediction_file)
