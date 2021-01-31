@@ -3,4 +3,5 @@
 .vscode
 venv
 
+data/
 results.txt
