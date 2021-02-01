@@ -278,7 +278,6 @@ def convert_examples_to_features(examples, slot_list, model_type, tokenizer, max
         if idx % 1000 == 0:
             logger.info(f"Writing example {idx} of {len(examples)}")
 
-        tot += 1
         start_labels = {}
         end_labels = {}
         seen_values = {}
