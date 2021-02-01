@@ -116,10 +116,10 @@ def plot_joint_slot_accs_by_experiment(output_dirs):
     plt.show()
 
 
-def analyze_errors(checkpoint_dir, data_path="data/MULTIWOZ2.1/"):
+def analyze_errors(checkpoint_dir, prediction_source="val", data_path="data/MULTIWOZ2.1/"):
     # load predictions file
-    result_path = os.path.join(checkpoint_dir, "predictions.json")
-    output_path = os.path.join(checkpoint_dir, "error_analysis.json")
+    result_path = os.path.join(checkpoint_dir, f"{prediction_source}_predictions.json")
+    output_path = os.path.join(checkpoint_dir, f"{prediction_source}_error_analysis.json")
     with open(result_path) as f:
         res = json.load(f)
 
