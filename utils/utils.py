@@ -87,12 +87,13 @@ def parse_args():
 
     # data args
     parser.add_argument("--data_path", type=str, default="data/MULTIWOZ2.1")
-    parser.add_argument("--output_dir", type=str, default="")
     parser.add_argument("--cache_features", type=bool, default=True)
     parser.add_argument("--overwrite_cache", action="store_true")
     parser.add_argument("--DB_file", type=str, default="")
     parser.add_argument("--label_value_repetitions", type=bool, default=True)
     parser.add_argument("--label_only_last_occurence", action="store_true")
+    parser.add_argument("--no_sys_utt", action="store_true")
+    parser.add_argument("--output_dir", type=str, default="")
 
     # debugging args
     parser.add_argument("--debugging", action="store_true")

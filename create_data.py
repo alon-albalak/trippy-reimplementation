@@ -47,14 +47,14 @@ def get_data(**kwargs):
     all_guids = [f.guid for f in features]
     all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
     all_attention_mask = torch.tensor([f.attention_mask for f in features], dtype=torch.float)
-    all_segment_ids = torch.tensor([f.segment_ids for f in features], dtype=torch.long)
+    all_segment_ids = torch.tensor([f.segment_ids for f in features], dtype=torch.long)  # Tensor of dim: Num_examples x sequence_len
 
     # reorganize all slot-dependent features into list first
-    f_start_labels = [f.start_labels for f in features]
+    f_start_labels = [f.start_labels for f in features]  # list of dicts, each dict is: {slot: sequence_len list of 0/1's}
     f_end_labels = [f.end_labels for f in features]
     f_seen_values = [f.seen_values for f in features]
     f_values = [f.values for f in features]
-    f_value_sources = [f.value_sources for f in features]
+    f_value_sources = [f.value_sources for f in features]  # list of dicts, each dict is {slot: num_sources len list of 0/1's}
     f_dialog_states = [f.dialog_states for f in features]
     f_inform_values = [f.inform_values for f in features]
     f_inform_slot_labels = [f.inform_slot_labels for f in features]
@@ -72,8 +72,25 @@ def get_data(**kwargs):
     all_refer_labels = {}
     all_DB_labels = {}
 
+    num_new_none = 0
     # reorganize all slot-dependent features by slot
     for slot in kwargs["slot_list"]:
+
+        if kwargs["no_sys_utt"]:
+            # first, set sys_utt to 0 in all sources
+            for f in f_value_sources:
+                if f[slot][kwargs["sources"].index("sys_utt")] == 1:
+                    a = f[slot]
+                f[slot][kwargs["sources"].index("sys_utt")] = 0
+                if sum(f[slot]) == 0:
+                    f[slot][kwargs["sources"].index("none")] = 1
+                    num_new_none += 1
+
+            # next, remove sys_utt labels from start_labels and end_labels
+            for start, end, segment_ids in zip(f_start_labels, f_end_labels, all_segment_ids):
+                start[slot] = start[slot] * (1 - segment_ids.numpy())
+                end[slot] = end[slot] * (1 - segment_ids.numpy())
+
         all_start_labels[slot] = torch.tensor([f[slot] for f in f_start_labels], dtype=torch.float)
         all_end_labels[slot] = torch.tensor([f[slot] for f in f_end_labels], dtype=torch.float)
         all_seen_values[slot] = [f[slot] for f in f_seen_values]
@@ -85,6 +102,8 @@ def get_data(**kwargs):
         all_refer_labels[slot] = torch.tensor([f[slot] for f in f_refer_labels], dtype=torch.long)
         all_DB_labels[slot] = torch.tensor([f[slot] for f in f_DB_labels], dtype=torch.long)
 
+    if kwargs["no_sys_utt"]:
+        print(f"num_new_none: {num_new_none}")
     dataset = TensorListDataset(
         all_guids,
         all_input_ids,
