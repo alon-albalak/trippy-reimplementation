@@ -237,7 +237,7 @@ def get_token_pos(token_list, value):
 
 
 def check_value_existence(value, utterance_tokens, value_variations):
-    # check if value_label
+    # check if value_label exists in utterance
     in_utterance, utterance_pos = get_token_pos(utterance_tokens, value)
     if not in_utterance and value in value_variations:
         for value_variation in value_variations[value]:
@@ -247,6 +247,10 @@ def check_value_existence(value, utterance_tokens, value_variations):
     return in_utterance, utterance_pos
 
 
+# slots to possibly exclude from DB:
+#   train-arriveBy, other time slots, etc.
+#   true/false slots??
+# Characters to ignore |><
 def check_DB(value_label, slot, value_variations, DB_values):
     # Placeholder, this will return the position of the value label within the DB
     return [0]
@@ -276,7 +280,7 @@ def get_turn_sources_and_labels(
     sys_utterance_token_label = [0 for _ in sys_utterance_tokens]
     informed_value = "none"
     referred_slot = "none"
-    DB_label = [0]  # temporary, since DB is not implemented
+    DB_label = [0]# temporary since DB is not implemented
 
     if value_label in ["none", "dontcare", "true", "false"]:
         value_sources[source_dict[value_label]] = 1
@@ -332,7 +336,7 @@ def load_multiwoz21_dataset(
     check_unpointable = False
     unpointable_in_hst = 0
     unpointable_unknown = 0
-    tot = 0
+    tot_samples = 0
 
     # source labels - none, dontcare, usr_utt, sys_utt, inform, refer, DB
     source_dict = {label: i for i, label in enumerate(sources)}
@@ -345,15 +349,15 @@ def load_multiwoz21_dataset(
     system_inform_dict = load_acts(acts_file)
     with open(config_file, "r") as f:
         raw_config = json.load(f)
+    slot_list = raw_config["slots"]
+    value_variations = raw_config["label_maps"]
+    inverse_value_variations = {vv: k for k, v in value_variations.items() for vv in v}
 
     if os.path.exists(DB_file):
         with open(DB_file) as f:
             DB_values = json.load(f)
     else:
         DB_values = {}
-
-    slot_list = raw_config["slots"]
-    value_variations = raw_config["label_maps"]
 
     data = []
     logger.info(f"************* Creating {dataset_type} samples ***************")
@@ -507,7 +511,9 @@ def load_multiwoz21_dataset(
                 # in case a value is unpointable, set the value source label to none
                 # ALON TODO: Analyze where these unpointable values come from
                 #   number of unpointable values reduced from 11% of train data to 1.1% of train data
-                tot += 1
+                # some of these values are listed as multiple possible values in the dataset
+                #       eg. "kings college|hughes hall"
+                tot_samples += 1
                 if sum(value_sources) == 0 and slot in turn_modified_slots:
                     if log_unpointable_values:
                         logger.info(f"Unpointable value {value_label} in {guid} turn {i} slot {slot}")
@@ -563,6 +569,6 @@ def load_multiwoz21_dataset(
             turn_itr += 1
 
     if check_unpointable:
-        logger.info(f"UNPOINTABLE IN HIST: {unpointable_in_hst}\tUNPOINTABLE UNKNOWN SOURCE: {unpointable_unknown}\tTOTAL: {tot}")
+        logger.info(f"UNPOINTABLE IN HIST: {unpointable_in_hst}\tUNPOINTABLE UNKNOWN SOURCE: {unpointable_unknown}\tTOTAL: {tot_samples}")
 
     return data
