@@ -103,7 +103,7 @@ def get_data(**kwargs):
         all_DB_labels[slot] = torch.tensor([f[slot] for f in f_DB_labels], dtype=torch.long)
 
     if kwargs["no_sys_utt"]:
-        print(f"num_new_none: {num_new_none}")
+        logger.info(f"Number of new unpointable values due to removing system utterance as a source: {num_new_none}")
     dataset = TensorListDataset(
         all_guids,
         all_input_ids,

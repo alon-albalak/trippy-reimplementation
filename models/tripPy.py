@@ -1,9 +1,12 @@
 # This file will contain a pytorch model
+import logging
 from numpy import prod
 import re
 import torch
 from torch.nn import Dropout, Linear, CrossEntropyLoss, BCEWithLogitsLoss
 from transformers import BertModel, BertPreTrainedModel
+
+logger = logging.getLogger(__name__)
 
 
 class BERTForDST(BertPreTrainedModel):
@@ -527,7 +530,7 @@ class BERTForDST(BertPreTrainedModel):
             highest_prob = 0
             pred_val = "none"
             if not value_prediction_distribution:
-                print(f"NO VALUE PREDICTIONS: guid - {guid} - {slot} - pred sources - {pred_sources}")
+                logger.info(f"NO VALUE PREDICTIONS: guid - {guid} - {slot} - pred sources - {pred_sources}")
             for val, prob in value_prediction_distribution.items():
                 if prob > highest_prob:
                     pred_val = val
@@ -615,7 +618,7 @@ def combine_value_variations_in_value_predictions(value_prediction_distribution,
                 if inverse_value_variations[val] in new_value_predictions:
                     new_value_predictions[inverse_value_variations[val]] += value_prediction_distribution[val]
                     found = True
-            
+
         if not found:
             new_value_predictions[val] = value_prediction_distribution[val]
     return new_value_predictions
