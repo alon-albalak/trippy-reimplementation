@@ -61,7 +61,6 @@ class BERTForDST(BertPreTrainedModel):
 
         pooled_output_aux = torch.cat((pooled_BERT, self.aux_inform_projection(inform_values), self.aux_ds_projection(dialog_state_labels)), 1)
 
-        total_loss = 0
         per_slot_source_logits = {}
         per_slot_start_logits = {}
         per_slot_end_logits = {}
@@ -93,6 +92,7 @@ class BERTForDST(BertPreTrainedModel):
         attention_mask,
         start_labels,
         end_labels,
+        segment_ids,
         value_sources,
         refer_labels,
         DB_labels,
@@ -119,8 +119,15 @@ class BERTForDST(BertPreTrainedModel):
 
             source_loss = torch.sum(self.source_loss_fct(per_slot_source_logits[slot], value_sources[slot]), dim=1)
 
+            # # ALON NOTE: segment_ids is 0 for only usr_utterance and 1 for all other tokens
+            # #   testing limiting the logits and labels only to usr utterances
+            # start_loss = self.token_loss_fct(per_slot_start_logits[slot], start_labels[slot])
+            # start_loss = torch.sum((1 - segment_ids) * start_loss, dim=1)
+            # end_loss = self.token_loss_fct(per_slot_end_logits[slot], end_labels[slot])
+            # end_loss = torch.sum((1 - segment_ids) * end_loss, dim=1)
+
             start_loss = self.token_loss_fct(per_slot_start_logits[slot], start_labels[slot])
-            start_loss = torch.sum(attention_mask * start_loss, dim=1)  # / torch.sum(attention_mask, dim=1)
+            start_loss = torch.sum(attention_mask * start_loss, dim=1)
             end_loss = self.token_loss_fct(per_slot_end_logits[slot], end_labels[slot])
             end_loss = torch.sum(attention_mask * end_loss, dim=1)
             # check if each sample has at least 1 starting token to determine if any tokens are pointable
@@ -188,6 +195,8 @@ class BERTForDST(BertPreTrainedModel):
         refer_labels,
         DB_labels,
         softgate,
+        value_variations,
+        inverse_value_variations,
     ):
         """Method which calculates statistics for evaluation
         such as source accuracy, token accuracy, refer accuracy
@@ -213,6 +222,8 @@ class BERTForDST(BertPreTrainedModel):
                 inform_slot_labels,
                 refer_labels,
                 DB_labels,
+                value_variations,
+                inverse_value_variations,
             )
 
         else:
@@ -273,8 +284,7 @@ class BERTForDST(BertPreTrainedModel):
                     # if pred_start > pred_end, treat it as "none"
                     if pred_start <= pred_end:
                         input_tokens = tokenizer.convert_ids_to_tokens(input_ids.squeeze())
-                        pred_dialog_state[slot] = " ".join(input_tokens[pred_start : pred_end + 1])
-                        pred_dialog_state[slot] = re.sub("(^| )##", "", pred_dialog_state[slot])
+                        pred_dialog_state[slot] = decode_normalize_tokens(input_tokens, pred_start, pred_end)
 
                 elif best_pred_source == "inform":
                     pred_dialog_state[slot] = inform_values[slot][0]
@@ -348,8 +358,7 @@ class BERTForDST(BertPreTrainedModel):
                 for end_logit, end_idx in zip(end_logits, end_idxs):
                     # ignore pairs where the predicted start is after the end
                     if start_idx <= end_idx and end_idx - start_idx <= 10:
-                        pred_value = " ".join(input_tokens[start_idx : end_idx + 1])
-                        pred_value = re.sub("(^| )##", "", pred_value)
+                        pred_value = decode_normalize_tokens(input_tokens, start_idx, end_idx)
                         if pred_value not in utterance_value_distribution:
                             utterance_value_distribution[pred_value] = 0
                         utterance_value_distribution[pred_value] += start_logit + end_logit
@@ -416,6 +425,8 @@ class BERTForDST(BertPreTrainedModel):
         inform_slot_labels,  # dict of {slot: 0/1} where the label is 1 if the slot was informed by the system
         refer_labels,
         DB_labels,
+        value_variations,
+        inverse_value_variations,
         source_topk=3,
         token_topk=3,
         refer_topk=2,
@@ -507,6 +518,10 @@ class BERTForDST(BertPreTrainedModel):
 
                 value_prediction_distribution = self.calculate_source_values(source, source_weight, value_prediction_distribution, **kwargs)
 
+            value_prediction_distribution = combine_value_variations_in_value_predictions(
+                value_prediction_distribution, value_variations, inverse_value_variations
+            )
+            # ALON TODO: Add a step to combine value variations?
             #   3. Combine probability distributions
             #   actually, just get the value with highest probability
             highest_prob = 0
@@ -548,6 +563,9 @@ class BERTForDST(BertPreTrainedModel):
 
                     value_prediction_distribution = self.calculate_source_values(source, source_weight, value_prediction_distribution, **kwargs)
 
+                value_prediction_distribution = combine_value_variations_in_value_predictions(
+                    value_prediction_distribution, value_variations, inverse_value_variations
+                )
                 # Combine probability distributions for this slot
                 highest_prob = 0
                 for val, prob in value_prediction_distribution.items():
@@ -565,3 +583,39 @@ class BERTForDST(BertPreTrainedModel):
                 del referred_slots[slot]
 
         return accuracies, pred_dialog_state, sample_info
+
+
+def decode_normalize_tokens(input_tokens, start_idx, end_idx):
+    pred_value = " ".join(input_tokens[start_idx : end_idx + 1])
+    pred_value = re.sub("(^| )##", "", pred_value)
+    # ALON NOTE: testing
+    # ALON RESULT: DID NOT IMPROVE - put these errors ("the ____ hotel" into config instead)
+    # if len(pred_value) > 4 and pred_value[:4] == "the ":
+    #     pred_value = pred_value[4:]
+    return pred_value
+
+
+def combine_value_variations_in_value_predictions(value_prediction_distribution, value_variations, inverse_value_variations):
+    new_value_predictions = {}
+    for val in value_prediction_distribution:
+        found = False
+        if val in new_value_predictions:
+            new_value_predictions[val] += value_prediction_distribution[val]
+            found = True
+        elif val in value_variations or val in inverse_value_variations:
+            if val in value_variations:
+                for variation in value_variations[val]:
+                    if variation in new_value_predictions:
+                        new_value_predictions[variation] += value_prediction_distribution[val]
+                        found = True
+                        break
+            if found:
+                break
+            if val in inverse_value_variations:
+                if inverse_value_variations[val] in new_value_predictions:
+                    new_value_predictions[inverse_value_variations[val]] += value_prediction_distribution[val]
+                    found = True
+            
+        if not found:
+            new_value_predictions[val] = value_prediction_distribution[val]
+    return new_value_predictions

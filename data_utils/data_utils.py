@@ -1,9 +1,18 @@
 import logging
+import json
 from tqdm import tqdm
 from torch.utils.data import Dataset
 
 logger = logging.getLogger(__name__)
 
+
+def get_multiwoz_config(config_file="data/MULTIWOZ2.1/config.json"):
+    with open(config_file, "r") as f:
+        raw_config = json.load(f)
+    slot_list = raw_config["slots"]
+    value_variations = raw_config["label_maps"]
+    inverse_value_variations = {vv: k for k, v in value_variations.items() for vv in v}
+    return slot_list, value_variations, inverse_value_variations
 
 class Example(object):
     """

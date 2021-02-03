@@ -4,6 +4,7 @@ import json
 from tqdm import tqdm
 
 import utils.utils
+from data_utils.data_utils import get_multiwoz_config
 from analysis import calculate_joint_slot_acc
 from create_data import get_data
 
@@ -40,6 +41,7 @@ def batch_to_device(batch, device):
 def main(**kwargs):
     # Setup logging
     logging.basicConfig(format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO)
+    _, value_variations, inverse_value_variations = get_multiwoz_config()
 
     # define model variables
     if kwargs["seed"] != -1:
@@ -54,12 +56,6 @@ def main(**kwargs):
     config.source_loss_ratio = kwargs["source_loss_ratio"]
     config.downweight_none_slot = kwargs["downweight_none_slot"]
 
-    tokenizer = tokenizer_class.from_pretrained(kwargs["model_name_or_path"], do_lower_case=kwargs["do_lower_case"])
-
-    model = model_class.from_pretrained(kwargs["model_name_or_path"], config=config)
-    model.to(kwargs["device"])
-    model.train()
-
     # load dataset into dataloader
     if kwargs["debugging"]:
         kwargs["dataset_type"] = "debugging"
@@ -71,11 +67,23 @@ def main(**kwargs):
     )
     if kwargs["eval_during_training"]:
         if kwargs["debugging"]:
-            kwargs["dataset_type"] = "train_debugging"
+            kwargs["dataset_type"] = "debugging"
         else:
             kwargs["dataset_type"] = "val"
         val_dataset, val_features = get_data(**kwargs)
         val_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=False, pin_memory=kwargs["pin_memory"])
+
+    if kwargs["DB_file"] and os.path.exists(kwargs["DB_file"]):
+        # DB not implemented
+        with open(kwargs["DB_file"], "r") as f:
+            config.DB = json.load(f)
+    else:
+        config.DB = {}
+    tokenizer = tokenizer_class.from_pretrained(kwargs["model_name_or_path"], do_lower_case=kwargs["do_lower_case"])
+
+    model = model_class.from_pretrained(kwargs["model_name_or_path"], config=config)
+    model.to(kwargs["device"])
+    model.train()
 
     gradient_accumulation_steps = kwargs["effective_batch_size"] / kwargs["gpu_batch_size"]
     total_optimization_steps = kwargs["num_epochs"] * (len(train_dataloader) // gradient_accumulation_steps)
@@ -139,6 +147,7 @@ def main(**kwargs):
                         attention_mask=attention_mask,
                         start_labels=start_labels,
                         end_labels=end_labels,
+                        segment_ids=segment_ids,
                         value_sources=value_sources,
                         refer_labels=refer_labels,
                         DB_labels=DB_labels,
@@ -174,6 +183,7 @@ def main(**kwargs):
                     attention_mask=attention_mask,
                     start_labels=start_labels,
                     end_labels=end_labels,
+                    segment_ids=segment_ids,
                     value_sources=value_sources,
                     refer_labels=refer_labels,
                     DB_labels=DB_labels,
@@ -257,6 +267,8 @@ def main(**kwargs):
                         refer_labels,
                         DB_labels,
                         kwargs["softgate"],
+                        value_variations,
+                        inverse_value_variations,
                     )
                 predictions.append(sample_info)
                 # pbar.set_description(

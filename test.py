@@ -4,6 +4,7 @@ import json
 from tqdm import tqdm
 
 import utils.utils
+from data_utils.data_utils import get_multiwoz_config
 from analysis import calculate_joint_slot_acc
 from create_data import get_data
 
@@ -36,6 +37,8 @@ def batch_to_device(batch, device):
 def main(**kwargs):
     # Setup logging
     logging.basicConfig(format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO)
+
+    _, value_variations, inverse_value_variations = get_multiwoz_config()
 
     model_path = os.path.join(kwargs["output_dir"], kwargs["eval_name"])
 
@@ -110,6 +113,8 @@ def main(**kwargs):
                 refer_labels,
                 DB_labels,
                 kwargs["softgate"],
+                value_variations,
+                inverse_value_variations,
             )
         predictions.append(sample_info)
 
