@@ -5,6 +5,7 @@ import re
 import torch
 from torch.nn import Dropout, Linear, CrossEntropyLoss, BCEWithLogitsLoss
 from transformers import BertModel, BertPreTrainedModel
+from data_utils.data_utils import decode_normalize_tokens, combine_value_variations_in_value_predictions
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +24,7 @@ class BERTForDST(BertPreTrainedModel):
         self.source_loss_ratio = config.source_loss_ratio
         self.downweight_none_slot = config.downweight_none_slot
 
-        slot_weighting = torch.tensor([self.downweight_none_slot] + [1] * (self.num_sources - 1))
-        self.source_loss_fct = BCEWithLogitsLoss(weight=slot_weighting, reduction="none")
+        self.source_loss_fct = BCEWithLogitsLoss(reduction="none")
         self.token_loss_fct = BCEWithLogitsLoss(reduction="none")
         self.refer_loss_fct = CrossEntropyLoss(reduction="none")
 
@@ -104,6 +104,7 @@ class BERTForDST(BertPreTrainedModel):
         per_slot_end_logits,
         per_slot_refer_logits,
         calculate_accs=False,
+        no_sys_token_loss=False,
     ):
 
         total_loss = 0
@@ -124,15 +125,16 @@ class BERTForDST(BertPreTrainedModel):
 
             # # ALON NOTE: segment_ids is 0 for only usr_utterance and 1 for all other tokens
             # #   testing limiting the logits and labels only to usr utterances
-            # start_loss = self.token_loss_fct(per_slot_start_logits[slot], start_labels[slot])
-            # start_loss = torch.sum((1 - segment_ids) * start_loss, dim=1)
-            # end_loss = self.token_loss_fct(per_slot_end_logits[slot], end_labels[slot])
-            # end_loss = torch.sum((1 - segment_ids) * end_loss, dim=1)
-
-            start_loss = self.token_loss_fct(per_slot_start_logits[slot], start_labels[slot])
-            start_loss = torch.sum(attention_mask * start_loss, dim=1)
-            end_loss = self.token_loss_fct(per_slot_end_logits[slot], end_labels[slot])
-            end_loss = torch.sum(attention_mask * end_loss, dim=1)
+            if no_sys_token_loss:
+                start_loss = self.token_loss_fct(per_slot_start_logits[slot], start_labels[slot])
+                start_loss = torch.sum((1 - segment_ids) * start_loss, dim=1)
+                end_loss = self.token_loss_fct(per_slot_end_logits[slot], end_labels[slot])
+                end_loss = torch.sum((1 - segment_ids) * end_loss, dim=1)
+            else:
+                start_loss = self.token_loss_fct(per_slot_start_logits[slot], start_labels[slot])
+                start_loss = torch.sum(attention_mask * start_loss, dim=1)
+                end_loss = self.token_loss_fct(per_slot_end_logits[slot], end_labels[slot])
+                end_loss = torch.sum(attention_mask * end_loss, dim=1)
             # check if each sample has at least 1 starting token to determine if any tokens are pointable
             token_is_pointable = (torch.sum(start_labels[slot], dim=1) > 0).float()
             token_loss = token_is_pointable * (start_loss + end_loss)
@@ -586,39 +588,3 @@ class BERTForDST(BertPreTrainedModel):
                 del referred_slots[slot]
 
         return accuracies, pred_dialog_state, sample_info
-
-
-def decode_normalize_tokens(input_tokens, start_idx, end_idx):
-    pred_value = " ".join(input_tokens[start_idx : end_idx + 1])
-    pred_value = re.sub("(^| )##", "", pred_value)
-    # ALON NOTE: testing
-    # ALON RESULT: DID NOT IMPROVE - put these errors ("the ____ hotel" into config instead)
-    # if len(pred_value) > 4 and pred_value[:4] == "the ":
-    #     pred_value = pred_value[4:]
-    return pred_value
-
-
-def combine_value_variations_in_value_predictions(value_prediction_distribution, value_variations, inverse_value_variations):
-    new_value_predictions = {}
-    for val in value_prediction_distribution:
-        found = False
-        if val in new_value_predictions:
-            new_value_predictions[val] += value_prediction_distribution[val]
-            found = True
-        elif val in value_variations or val in inverse_value_variations:
-            if val in value_variations:
-                for variation in value_variations[val]:
-                    if variation in new_value_predictions:
-                        new_value_predictions[variation] += value_prediction_distribution[val]
-                        found = True
-                        break
-            if found:
-                break
-            if val in inverse_value_variations:
-                if inverse_value_variations[val] in new_value_predictions:
-                    new_value_predictions[inverse_value_variations[val]] += value_prediction_distribution[val]
-                    found = True
-
-        if not found:
-            new_value_predictions[val] = value_prediction_distribution[val]
-    return new_value_predictions

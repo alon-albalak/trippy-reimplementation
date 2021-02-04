@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import json
 import os
 import re
+from data_utils.data_utils import get_multiwoz_config
 
 sources = ["none", "dontcare", "usr_utt", "sys_utt", "inform", "refer", "DB", "true", "false"]
 slot_list = [
@@ -43,15 +44,14 @@ def tokenize(text):
         text = re.sub(" ", "", text)
         text = re.sub("\u0120", " ", text)
         text = text.strip()
+        if text[:4] == "the ":
+            text = text[4:]
     return " ".join([tok for tok in map(str.strip, re.split("(\W+)", text)) if len(tok) > 0])
 
 
 def calculate_joint_slot_acc(result_path, data_path="data/MULTIWOZ2.1/"):
-    config_file = os.path.join(data_path, "config.json")
-    with open(config_file, "r") as f:
-        raw_config = json.load(f)
+    _, value_variations, _ = get_multiwoz_config()
 
-    value_variations = raw_config["label_maps"]
     tokenized_value_variations = {}
     for val in value_variations:
         tokenized_value_variations[tokenize(val)] = [tokenize(v) for v in value_variations[val]]
