@@ -119,15 +119,19 @@ def get_data(**kwargs):
             # also need to adjust the dialog states
             for f in f_dialog_states:
                 for pref in order_of_preference:
-                    if f[slot][kwargs['sources'].index(pref)] == 1:
-                        f[slot] = kwargs['sources'].index(pref)
+                    if f[slot][kwargs["sources"].index(pref)] == 1:
+                        f[slot] = kwargs["sources"].index(pref)
                         break
 
-        all_start_labels[slot] = torch.tensor([f[slot] for f in f_start_labels], dtype=torch.long if kwargs["exact_reimplementation"] else torch.float)
+        all_start_labels[slot] = torch.tensor(
+            [f[slot] for f in f_start_labels], dtype=torch.long if kwargs["exact_reimplementation"] else torch.float
+        )
         all_end_labels[slot] = torch.tensor([f[slot] for f in f_end_labels], dtype=torch.long if kwargs["exact_reimplementation"] else torch.float)
         all_seen_values[slot] = [f[slot] for f in f_seen_values]
         all_values[slot] = [f[slot] for f in f_values]
-        all_value_sources[slot] = torch.tensor([f[slot] for f in f_value_sources], dtype=torch.long if kwargs["exact_reimplementation"] else torch.float)
+        all_value_sources[slot] = torch.tensor(
+            [f[slot] for f in f_value_sources], dtype=torch.long if kwargs["exact_reimplementation"] else torch.float
+        )
         all_dialog_states[slot] = torch.tensor([f[slot] for f in f_dialog_states], dtype=torch.float)
         all_inform_values[slot] = [f[slot] for f in f_inform_values]
         all_inform_slot_labels[slot] = torch.tensor([f[slot] for f in f_inform_slot_labels], dtype=torch.float)

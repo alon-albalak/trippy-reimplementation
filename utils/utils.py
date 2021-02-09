@@ -120,8 +120,8 @@ def parse_args():
         setattr(args, "no_sys_utt", True)
         setattr(args, "single_source_label", True)
         setattr(args, "softgate", False)
-        global sources
-        sources = ["none", "dontcare", "usr_utt", "true", "false", "refer", "inform"]
+        # global sources
+        # sources = ["none", "dontcare", "usr_utt", "true", "false", "refer", "inform"]
 
     setattr(args, "sources", sources)
     setattr(args, "slot_list", slot_list)
