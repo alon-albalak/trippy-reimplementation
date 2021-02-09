@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 def set_seed(seed):
     torch.manual_seed(seed)
-
+    logger.info(f"Setting seed to {seed}")
 
 def batch_to_device(batch, device):
     batch_on_device = []
@@ -54,7 +54,7 @@ def main(**kwargs):
     config.sources = kwargs["sources"]
     config.bert_dropout_rate = kwargs["bert_dropout_rate"]
     config.source_loss_ratio = kwargs["source_loss_ratio"]
-    config.downweight_none_slot = kwargs["downweight_none_slot"]
+    config.exact_reimplementation = kwargs["exact_reimplementation"]
 
     # load dataset into dataloader
     if kwargs["debugging"]:
@@ -221,7 +221,6 @@ def main(**kwargs):
         if kwargs["eval_during_training"]:
             predictions = []
             pred_dialog_state = {slot: "none" for slot in model.slot_list}
-            source_acc, token_acc, refer_acc = 1, 1, 1
 
             model.eval()
             pbar = tqdm(enumerate(val_dataloader), total=len(val_dataloader))

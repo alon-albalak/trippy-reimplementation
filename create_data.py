@@ -76,7 +76,7 @@ def get_data(**kwargs):
     # reorganize all slot-dependent features by slot
     for slot in kwargs["slot_list"]:
 
-        if kwargs["no_sys_utt"]:
+        if kwargs["exact_reimplementation"]:
             # first, set sys_utt to 0 in all sources
             for f in f_value_sources:
                 if f[slot][kwargs["sources"].index("sys_utt")] == 1:
@@ -89,20 +89,52 @@ def get_data(**kwargs):
             # next, remove sys_utt labels from start_labels and end_labels
             for start, end, segment_ids in zip(f_start_labels, f_end_labels, all_segment_ids):
                 start[slot] = start[slot] * (1 - segment_ids.numpy())
+                start[slot] = start[slot].tolist()
                 end[slot] = end[slot] * (1 - segment_ids.numpy())
+                end[slot] = end[slot].tolist()
 
-        all_start_labels[slot] = torch.tensor([f[slot] for f in f_start_labels], dtype=torch.float)
-        all_end_labels[slot] = torch.tensor([f[slot] for f in f_end_labels], dtype=torch.float)
+            # next, for token labels, only consider the first ground truth token
+            for f in f_start_labels:
+                if sum(f[slot]) == 0:
+                    f[slot] = 0
+                else:
+                    f[slot] = f[slot].index(1)
+            for f in f_end_labels:
+                if sum(f[slot]) == 0:
+                    f[slot] = 0
+                else:
+                    f[slot] = f[slot].index(1)
+
+            # if converting multi-labeled sources to single-label, do so after all other adjustments
+            # Need to adjust the value_sources
+            # priority for sources is: usr, inform, refer.
+            # Everything else stays as is: None, True, False, dontcare
+            order_of_preference = ["usr_utt", "inform", "refer", "true", "false", "dontcare", "none"]
+            for f in f_value_sources:
+                for pref in order_of_preference:
+                    if f[slot][kwargs["sources"].index(pref)] == 1:
+                        f[slot] = kwargs["sources"].index(pref)
+                        break
+
+            # also need to adjust the dialog states
+            for f in f_dialog_states:
+                for pref in order_of_preference:
+                    if f[slot][kwargs['sources'].index(pref)] == 1:
+                        f[slot] = kwargs['sources'].index(pref)
+                        break
+
+        all_start_labels[slot] = torch.tensor([f[slot] for f in f_start_labels], dtype=torch.long if kwargs["exact_reimplementation"] else torch.float)
+        all_end_labels[slot] = torch.tensor([f[slot] for f in f_end_labels], dtype=torch.long if kwargs["exact_reimplementation"] else torch.float)
         all_seen_values[slot] = [f[slot] for f in f_seen_values]
         all_values[slot] = [f[slot] for f in f_values]
-        all_value_sources[slot] = torch.tensor([f[slot] for f in f_value_sources], dtype=torch.float)
+        all_value_sources[slot] = torch.tensor([f[slot] for f in f_value_sources], dtype=torch.long if kwargs["exact_reimplementation"] else torch.float)
         all_dialog_states[slot] = torch.tensor([f[slot] for f in f_dialog_states], dtype=torch.float)
         all_inform_values[slot] = [f[slot] for f in f_inform_values]
         all_inform_slot_labels[slot] = torch.tensor([f[slot] for f in f_inform_slot_labels], dtype=torch.float)
         all_refer_labels[slot] = torch.tensor([f[slot] for f in f_refer_labels], dtype=torch.long)
         all_DB_labels[slot] = torch.tensor([f[slot] for f in f_DB_labels], dtype=torch.long)
 
-    if kwargs["no_sys_utt"]:
+    if kwargs["exact_reimplementation"]:
         logger.info(f"Number of new unpointable values due to removing system utterance as a source: {num_new_none}")
     dataset = TensorListDataset(
         all_guids,

@@ -287,10 +287,16 @@ def get_turn_sources_and_labels(
 
     else:
         in_usr, usr_pos = check_value_existence(value_label, usr_utterance_tokens, value_variations)
-        in_sys, sys_pos = check_value_existence(value_label, sys_utterance_tokens, value_variations)
+        if "sys_utt" in source_dict:
+            in_sys = False
+        else:
+            in_sys, sys_pos = check_value_existence(value_label, sys_utterance_tokens, value_variations)
         is_informed, informed_value = check_slot_inform(value_label, inform_value, value_variations)
         referred_slot = check_slot_referral(value_label, slot, seen_slots, value_variations)
-        DB_label = check_DB(value_label, slot, value_variations, DB_values)
+        if "DB" in source_dict:
+            DB_label = [0]
+        else:
+            DB_label = check_DB(value_label, slot, value_variations, DB_values)
 
         if in_usr:
             value_sources[source_dict["usr_utt"]] = 1

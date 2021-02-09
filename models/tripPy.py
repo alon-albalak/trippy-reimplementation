@@ -22,16 +22,25 @@ class BERTForDST(BertPreTrainedModel):
         self.source_dict = {source: i for i, source in enumerate(self.sources)}
         self.num_sources = len(self.sources)
         self.source_loss_ratio = config.source_loss_ratio
-        self.downweight_none_slot = config.downweight_none_slot
+        if hasattr(config, "exact_reimplementation"):
+            self.exact_reimplementation = config.exact_reimplementation
+        else:
+            self.exact_reimplementation = False
 
-        self.source_loss_fct = BCEWithLogitsLoss(reduction="none")
-        self.token_loss_fct = BCEWithLogitsLoss(reduction="none")
+        if self.exact_reimplementation:
+            self.source_loss_fct = CrossEntropyLoss(reduction="none")
+            self.token_loss_fct = CrossEntropyLoss(reduction="none")
+            self.aux_ds_projection = Linear(len(self.slot_list), len(self.slot_list))
+        else:
+            self.source_loss_fct = BCEWithLogitsLoss(reduction="none")
+            self.token_loss_fct = BCEWithLogitsLoss(reduction="none")
+            self.aux_ds_projection = Linear(len(self.slot_list) * self.num_sources, len(self.slot_list))
+
         self.refer_loss_fct = CrossEntropyLoss(reduction="none")
 
         # add module for using inform slots as auxiliary feature
         self.aux_inform_projection = Linear(len(self.slot_list), len(self.slot_list))
         # add module for using dialog state as auxiliary feature
-        self.aux_ds_projection = Linear(len(self.slot_list) * self.num_sources, len(self.slot_list))
         aux_dims = 2 * len(self.slot_list)
 
         for slot in self.slot_list:
@@ -60,7 +69,10 @@ class BERTForDST(BertPreTrainedModel):
         pooled_BERT = self.dropout(pooled_BERT)
 
         inform_values = torch.stack(list(inform_slot_labels.values()), 1)
-        dialog_state_labels = torch.reshape(torch.stack(list(dialog_states.values()), 1), (inform_values.shape[0], -1))
+        if self.exact_reimplementation:
+            dialog_state_labels = torch.clamp(torch.stack(list(dialog_states.values()), 1).float(), 0.0, 1.0)
+        else:
+            dialog_state_labels = torch.reshape(torch.stack(list(dialog_states.values()), 1), (inform_values.shape[0], -1))
 
         pooled_output_aux = torch.cat((pooled_BERT, self.aux_inform_projection(inform_values), self.aux_ds_projection(dialog_state_labels)), 1)
 
@@ -104,7 +116,6 @@ class BERTForDST(BertPreTrainedModel):
         per_slot_end_logits,
         per_slot_refer_logits,
         calculate_accs=False,
-        no_sys_token_loss=False,
     ):
 
         total_loss = 0
@@ -121,26 +132,33 @@ class BERTForDST(BertPreTrainedModel):
 
         for slot in self.slot_list:
 
-            source_loss = torch.sum(self.source_loss_fct(per_slot_source_logits[slot], value_sources[slot]), dim=1)
-
-            # # ALON NOTE: segment_ids is 0 for only usr_utterance and 1 for all other tokens
-            # #   testing limiting the logits and labels only to usr utterances
-            if no_sys_token_loss:
+            if self.exact_reimplementation:
+                source_loss = self.source_loss_fct(per_slot_source_logits[slot], value_sources[slot])
+                ignored_index = per_slot_start_logits[slot].size(1)
+                start_labels[slot].clamp(0, ignored_index)
+                end_labels[slot].clamp(0, ignored_index)
+                self.token_loss_fct = CrossEntropyLoss(reduction="none", ignore_index=ignored_index)
                 start_loss = self.token_loss_fct(per_slot_start_logits[slot], start_labels[slot])
-                start_loss = torch.sum((1 - segment_ids) * start_loss, dim=1)
                 end_loss = self.token_loss_fct(per_slot_end_logits[slot], end_labels[slot])
-                end_loss = torch.sum((1 - segment_ids) * end_loss, dim=1)
+                token_is_pointable = (start_labels[slot] > 0).float()
             else:
+                source_loss = torch.sum(self.source_loss_fct(per_slot_source_logits[slot], value_sources[slot]), dim=1)
                 start_loss = self.token_loss_fct(per_slot_start_logits[slot], start_labels[slot])
+                # ALON TODO: check out whether this attention mask is really what we want
                 start_loss = torch.sum(attention_mask * start_loss, dim=1)
                 end_loss = self.token_loss_fct(per_slot_end_logits[slot], end_labels[slot])
                 end_loss = torch.sum(attention_mask * end_loss, dim=1)
-            # check if each sample has at least 1 starting token to determine if any tokens are pointable
-            token_is_pointable = (torch.sum(start_labels[slot], dim=1) > 0).float()
+                # check if each sample has at least 1 starting token to determine if any tokens are pointable
+                token_is_pointable = (torch.sum(start_labels[slot], dim=1) > 0).float()
             token_loss = token_is_pointable * (start_loss + end_loss)
 
             refer_loss = self.refer_loss_fct(per_slot_refer_logits[slot], refer_labels[slot])
-            token_is_referrable = (value_sources[slot][:, self.source_dict["refer"]] == 1).float()
+
+            if self.exact_reimplementation:
+                token_is_referrable = (value_sources[slot] == self.source_dict["refer"]).float()
+            else:
+                token_is_referrable = (value_sources[slot][:, self.source_dict["refer"]] == 1).float()
+
             refer_loss *= token_is_referrable
 
             per_example_loss = (self.source_loss_ratio * source_loss) + ((1 - self.source_loss_ratio) / 2) * (token_loss + refer_loss)
@@ -261,10 +279,13 @@ class BERTForDST(BertPreTrainedModel):
                 pred_start = torch.argmax(per_slot_start_logits[slot])
                 pred_end = torch.argmax(per_slot_end_logits[slot])
 
-                ground_truth_source_idxs = torch.nonzero(value_sources[slot].squeeze() == 1)
-                ground_truth_sources = []
-                for idx in ground_truth_source_idxs:
-                    ground_truth_sources.append(self.sources[idx])
+                if self.exact_reimplementation:
+                    ground_truth_sources = [self.sources[value_sources[slot]]]
+                else:
+                    ground_truth_source_idxs = torch.nonzero(value_sources[slot].squeeze() == 1)
+                    ground_truth_sources = []
+                    for idx in ground_truth_source_idxs:
+                        ground_truth_sources.append(self.sources[idx])
                 sample_info[f"ground_truth_sources_{slot}"] = ground_truth_sources
                 ground_truth_start_idxs = torch.nonzero(start_labels[slot].squeeze() == 1)
                 ground_truth_end_idxs = torch.nonzero(end_labels[slot].squeeze() == 1)
@@ -544,7 +565,7 @@ class BERTForDST(BertPreTrainedModel):
             sample_info[f"pred_sources_{slot}"] = [pred[0] for pred in pred_sources]
 
         # return for the slots which have referral source
-        # Although conceptually impossible, it is possible that annotationg suggest that 2 slots refer to each other, if this is the case, break the tie arbitrarily
+        # Although conceptually impossible, it is possible that annotations suggest that 2 slots refer to each other, if this is the case, break the tie arbitrarily
         while referred_slots:
             used_slots = []
             for slot in referred_slots:

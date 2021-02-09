@@ -58,6 +58,15 @@ def parse_args():
     parser.add_argument("--model_name_or_path", type=str, default="bert-base-uncased")
     parser.add_argument("--max_sequence_len", type=int, default=180)
     parser.add_argument("--bert_dropout_rate", type=float, default=0.3, help="Dropout rate for BERT representations")
+    parser.add_argument("--no_sys_utt", action="store_true")
+    parser.add_argument("--single_source_label", action="store_true", help="make the source a single-label, multi-class classification problem")
+    parser.add_argument(
+        "--single_utt_label",
+        action="store_true",
+        help="label only the first appearance of a value found in utterances. \
+                This will also convert the loss function from binary cross entropy-per token to cross entropy for the whole utterance",
+    )
+    parser.add_argument("--exact_reimplementation", action="store_true", help="train a model which is essentially the same as the original TripPy")
 
     # training args
     parser.add_argument("-e", "--num_epochs", type=int, default=10)
@@ -72,7 +81,6 @@ def parse_args():
     parser.add_argument("--eval_during_training", type=bool, default=True)
     parser.add_argument("--save_model_checkpoints", type=bool, default=True)
     parser.add_argument("--calculate_accs", action="store_true")
-    parser.add_argument("--downweight_none_slot", type=float, default=1.0)
 
     # testing args
     parser.add_argument("--eval_name", type=str, help="name of model to be evaluated")
@@ -92,7 +100,6 @@ def parse_args():
     parser.add_argument("--DB_file", type=str, default="")
     parser.add_argument("--label_value_repetitions", type=bool, default=True)
     parser.add_argument("--label_only_last_occurence", action="store_true")
-    parser.add_argument("--no_sys_utt", action="store_true")
     parser.add_argument("--output_dir", type=str, default="")
 
     # debugging args
@@ -104,6 +111,17 @@ def parse_args():
         setattr(args, "device", "cuda" if cuda.is_available() else "cpu")
     else:
         setattr(args, "device", "cpu")
+
+    if getattr(args, "single_utt_label"):
+        assert getattr(args, "no_sys_utt"), "if using only single utterance labels, make sure to remove system utterances from source"
+
+    if getattr(args, "exact_reimplementation"):
+        setattr(args, "single_utt_label", True)
+        setattr(args, "no_sys_utt", True)
+        setattr(args, "single_source_label", True)
+        setattr(args, "softgate", False)
+        global sources
+        sources = ["none", "dontcare", "usr_utt", "true", "false", "refer", "inform"]
 
     setattr(args, "sources", sources)
     setattr(args, "slot_list", slot_list)
