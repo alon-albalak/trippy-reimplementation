@@ -4,7 +4,6 @@ import os
 import re
 from data_utils.data_utils import get_multiwoz_config
 
-sources = ["none", "dontcare", "usr_utt", "sys_utt", "inform", "refer", "DB", "true", "false"]
 slot_list = [
     "taxi-leaveAt",
     "taxi-destination",
@@ -44,9 +43,22 @@ def tokenize(text):
         text = re.sub(" ", "", text)
         text = re.sub("\u0120", " ", text)
         text = text.strip()
-        if text[:4] == "the ":
-            text = text[4:]
+    if text[:4] == "the ":
+        text = text[4:]
     return " ".join([tok for tok in map(str.strip, re.split("(\W+)", text)) if len(tok) > 0])
+
+
+def is_in_list(tok, value):
+    found = False
+    tok_list = [item for item in map(str.strip, re.split("(\W+)", tok)) if len(item) > 0]
+    value_list = [item for item in map(str.strip, re.split("(\W+)", value)) if len(item) > 0]
+    tok_len = len(tok_list)
+    value_len = len(value_list)
+    for i in range(tok_len + 1 - value_len):
+        if tok_list[i : i + value_len] == value_list:
+            found = True
+            break
+    return found
 
 
 def calculate_joint_slot_acc(result_path, data_path="data/MULTIWOZ2.1/"):
@@ -82,10 +94,36 @@ def calculate_joint_slot_acc(result_path, data_path="data/MULTIWOZ2.1/"):
                     gt_vals.append(inverse_value_variations[tokenized_gt_val])
                     # ensure that we get all variations
                     gt_vals.extend(value_variations[inverse_value_variations[tokenized_gt_val]])
+
+            pred_sources = r[f"pred_sources_{slot}"]
+            gt_source = r[f"ground_truth_sources_{slot}"]
+
+            match = pred_val in gt_vals
+
+            if (
+                not match
+                and ((pred_sources == "inform" and (gt_source == "inform" or gt_source[0] == "inform"))
+                or (pred_sources == "refer" and (gt_source == "refer" or gt_source[0] == "refer")))
+            ):
+                for gt_val in gt_vals:
+                    if is_in_list(pred_val, gt_val) or is_in_list(gt_val, pred_val):
+                        match = True
+                        break
+                    if pred_val in value_variations:
+                        for pred_variation in value_variations[pred_val]:
+                            if is_in_list(pred_variation, gt_val) or is_in_list(gt_val, pred_variation):
+                                match = True
+                                break
+                    if pred_val in inverse_value_variations:
+                        for pred_variation in inverse_value_variations[pred_val]:
+                            if is_in_list(pred_variation, gt_val) or is_in_list(gt_val, pred_variation):
+                                match = True
+                                break
             # check if the predicted value is equivalent to the ground truth
-            if pred_val not in gt_vals:
+            if not match:
                 all_correct = False
                 break
+
         if all_correct:
             joint_correct += 1
         joint_total += 1
@@ -116,7 +154,12 @@ def plot_joint_slot_accs_by_experiment(output_dirs):
     plt.show()
 
 
-def analyze_errors(checkpoint_dir, prediction_source="val", data_path="data/MULTIWOZ2.1/"):
+def analyze_errors(
+    checkpoint_dir,
+    prediction_source="val",
+    data_path="data/MULTIWOZ2.1/",
+    sources=["none", "dontcare", "usr_utt", "sys_utt", "inform", "refer", "DB", "true", "false"],
+):
     # load predictions file
     result_path = os.path.join(checkpoint_dir, f"{prediction_source}_predictions.json")
     output_path = os.path.join(checkpoint_dir, f"{prediction_source}_error_analysis.json")
@@ -166,7 +209,29 @@ def analyze_errors(checkpoint_dir, prediction_source="val", data_path="data/MULT
             pred_sources = r[f"pred_sources_{slot}"]
             gt_source = r[f"ground_truth_sources_{slot}"]
 
-            if pred_val not in gt_vals:
+            match = pred_val in gt_vals
+
+            if (
+                not match
+                and ((pred_sources == "inform" and (gt_source == "inform" or gt_source[0] == "inform"))
+                or (pred_sources == "refer" and (gt_source == "refer" or gt_source[0] == "refer")))
+            ):
+                for gt_val in gt_vals:
+                    if is_in_list(pred_val, gt_val) or is_in_list(gt_val, pred_val):
+                        match = True
+                        break
+                    if pred_val in value_variations:
+                        for pred_variation in value_variations[pred_val]:
+                            if is_in_list(pred_variation, gt_val) or is_in_list(gt_val, pred_variation):
+                                match = True
+                                break
+                    if pred_val in inverse_value_variations:
+                        for pred_variation in inverse_value_variations[pred_val]:
+                            if is_in_list(pred_variation, gt_val) or is_in_list(gt_val, pred_variation):
+                                match = True
+                                break
+
+            if not match:
                 slot_info["incorrect_predictions"].append(
                     f"{r['guid']} - PREDICTED {pred_val} (source {pred_sources}) | GROUND TRUTH {gt_vals} (source {gt_source}"
                 )

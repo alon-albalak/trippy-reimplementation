@@ -61,7 +61,7 @@ class BERTForDST(BertPreTrainedModel):
         dialog_states,
         inform_slot_labels,
     ):
-        outputs = self.bert(input_ids, attention_mask, segment_ids)
+        outputs = self.bert(input_ids, attention_mask=attention_mask, token_type_ids=segment_ids)
         last_hidden_layer_BERT = outputs[0]
         pooled_BERT = outputs[1]
 
@@ -281,14 +281,17 @@ class BERTForDST(BertPreTrainedModel):
 
                 if self.exact_reimplementation:
                     ground_truth_sources = [self.sources[value_sources[slot]]]
+                    ground_truth_start_idxs = start_labels[slot]
+                    ground_truth_end_idxs = end_labels[slot]
                 else:
                     ground_truth_source_idxs = torch.nonzero(value_sources[slot].squeeze() == 1)
                     ground_truth_sources = []
                     for idx in ground_truth_source_idxs:
                         ground_truth_sources.append(self.sources[idx])
+                    ground_truth_start_idxs = torch.nonzero(start_labels[slot].squeeze() == 1)
+                    ground_truth_end_idxs = torch.nonzero(end_labels[slot].squeeze() == 1)
+
                 sample_info[f"ground_truth_sources_{slot}"] = ground_truth_sources
-                ground_truth_start_idxs = torch.nonzero(start_labels[slot].squeeze() == 1)
-                ground_truth_end_idxs = torch.nonzero(end_labels[slot].squeeze() == 1)
                 ground_truth_refer = refer_labels[slot]
 
                 # sample_info["source_pred"] = pred_source
@@ -322,7 +325,10 @@ class BERTForDST(BertPreTrainedModel):
                 best_pred_source = self.sources[best_pred_source_idx]
                 if best_pred_source == "refer":
                     pred_refer = torch.argmax(per_slot_refer_logits[slot])
-                    pred_dialog_state[slot] = pred_dialog_state[self.slot_list[int(pred_refer) - 1]][0]
+                    if self.exact_reimplementation:
+                        pred_dialog_state[slot] = pred_dialog_state[self.slot_list[int(pred_refer) - 1]]
+                    else:
+                        pred_dialog_state[slot] = pred_dialog_state[self.slot_list[int(pred_refer) - 1]][0]  # ALON TODO: should this not be indexed?
 
                 # add predicted values and ground truth values to sample info
                 sample_info[f"pred_value_{slot}"] = pred_dialog_state[slot]
