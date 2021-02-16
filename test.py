@@ -65,7 +65,7 @@ def main(**kwargs):
     # batch_size always set to 1 to handle sequential nature of dialogue
     test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
-    logger.info(f"******** Evaluating {kwargs['eval_name']} ************")
+    logger.info(f"******** Evaluating {model_path} ************")
     logger.info(f"  Num samples: {len(test_dataset)}")
 
     predictions = []
@@ -121,6 +121,7 @@ def main(**kwargs):
     output_predictions_file = os.path.join(model_path, f"{kwargs['dataset_type']}_predictions.json")
     with open(output_predictions_file, "w") as f:
         json.dump(predictions, f, indent=2)
+    logger.info(f"    Saving predictions {output_predictions_file}")
     joint_correct, joint_total = calculate_joint_slot_acc(output_predictions_file)
     logger.info(f"    Test joint slot accuracy: {joint_correct/joint_total} - {output_predictions_file}")
 

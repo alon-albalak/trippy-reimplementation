@@ -1,6 +1,8 @@
 import logging
 import os
 import json
+import random
+import numpy as np
 from tqdm import tqdm
 
 import utils.utils
@@ -19,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 
 def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
     torch.manual_seed(seed)
     logger.info(f"Setting seed to {seed}")
 
@@ -100,6 +104,7 @@ def main(**kwargs):
     logger.info(f"   Num epochs: {kwargs['num_epochs']}")
     logger.info(f"   Total optimization steps: {total_optimization_steps}")
     logger.info(f"   Warmup steps {num_warmup_steps}")
+    logger.info(f"   Sources {kwargs['sources']}")
 
     best_joint_acc = 0
 

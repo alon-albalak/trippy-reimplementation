@@ -6,13 +6,10 @@ from torch.utils.data import Dataset
 
 logger = logging.getLogger(__name__)
 
+
 def decode_normalize_tokens(input_tokens, start_idx, end_idx):
     pred_value = " ".join(input_tokens[start_idx : end_idx + 1])
     pred_value = re.sub("(^| )##", "", pred_value)
-    # ALON NOTE: testing
-    # ALON RESULT: DID NOT IMPROVE - put these errors ("the ____ hotel" into config instead)
-    # if len(pred_value) > 4 and pred_value[:4] == "the ":
-    #     pred_value = pred_value[4:]
     return pred_value
 
 
@@ -41,6 +38,7 @@ def combine_value_variations_in_value_predictions(value_prediction_distribution,
             new_value_predictions[val] = value_prediction_distribution[val]
     return new_value_predictions
 
+
 def get_multiwoz_config(config_file="data/MULTIWOZ2.1/config.json"):
     with open(config_file, "r") as f:
         raw_config = json.load(f)
@@ -48,6 +46,7 @@ def get_multiwoz_config(config_file="data/MULTIWOZ2.1/config.json"):
     value_variations = raw_config["label_maps"]
     inverse_value_variations = {vv: k for k, v in value_variations.items() for vv in v}
     return slot_list, value_variations, inverse_value_variations
+
 
 class Example(object):
     """
@@ -157,7 +156,7 @@ class Features(object):
         self.DB_labels = DB_labels
 
 
-def convert_examples_to_features(examples, slot_list, model_type, tokenizer, max_sequence_len):
+def convert_examples_to_features(examples, slot_list, model_type, tokenizer, max_sequence_len, exact_reimplementation=False):
     """converts a list of Example's into a list of Features"""
 
     if model_type == "bert":
