@@ -77,6 +77,9 @@ def calculate_joint_slot_acc(result_path, data_path="data/MULTIWOZ2.1/"):
 
     for r in res:
         all_correct = True
+        if r["guid"].split("-")[-1] == "0":
+            pred_dialogue_state = {slot: "none" for slot in slot_list}
+            ground_truth_dialogue_state = {slot: "none" for slot in slot_list}
         for slot in slot_list:
             pred_val = tokenize(r[f"pred_value_{slot}"])
             gt_vals = []
@@ -100,11 +103,20 @@ def calculate_joint_slot_acc(result_path, data_path="data/MULTIWOZ2.1/"):
 
             match = pred_val in gt_vals
 
-            if (
-                not match
-                and ((pred_sources == "inform" and (gt_source == "inform" or gt_source[0] == "inform"))
-                or (pred_sources == "refer" and (gt_source == "refer" or gt_source[0] == "refer")))
-            ):
+            if pred_sources == "none":
+                pass
+            else:
+                pred_dialogue_state[slot] = pred_sources
+
+            if gt_source == "none" or gt_source[0] == "none":
+                pass
+            else:
+                ground_truth_dialogue_state[slot] = gt_source[0]
+
+            cur_turn_inform = pred_dialogue_state[slot] == "inform" and ground_truth_dialogue_state[slot] == "inform"
+            cur_turn_refer = pred_dialogue_state[slot] == "refer" and ground_truth_dialogue_state[slot] == "refer"
+
+            if not match and (cur_turn_inform or cur_turn_refer):
                 for gt_val in gt_vals:
                     if is_in_list(pred_val, gt_val) or is_in_list(gt_val, pred_val):
                         match = True
@@ -187,6 +199,9 @@ def analyze_errors(
         slot_info = {"incorrect_predictions": []}
         source_scores_by_slot = {source: {"tp": 0, "fp": 0, "tn": 0, "fn": 0} for source in sources}
         for r in res:
+            if r["guid"].split("-")[-1] == "0":
+                pred_dialogue_state = "none"
+                ground_truth_dialogue_state = "none"
 
             pred_val = tokenize(r[f"pred_value_{slot}"])
             gt_vals = set()
@@ -211,11 +226,20 @@ def analyze_errors(
 
             match = pred_val in gt_vals
 
-            if (
-                not match
-                and ((pred_sources == "inform" and (gt_source == "inform" or gt_source[0] == "inform"))
-                or (pred_sources == "refer" and (gt_source == "refer" or gt_source[0] == "refer")))
-            ):
+            if pred_sources == "none":
+                pass
+            else:
+                pred_dialogue_state = pred_sources
+
+            if gt_source == "none" or gt_source[0] == "none":
+                pass
+            else:
+                ground_truth_dialogue_state = gt_source[0]
+
+            cur_turn_inform = pred_dialogue_state == "inform" and ground_truth_dialogue_state == "inform"
+            cur_turn_refer = pred_dialogue_state == "refer" and ground_truth_dialogue_state == "refer"
+
+            if not match and (cur_turn_inform or cur_turn_refer):
                 for gt_val in gt_vals:
                     if is_in_list(pred_val, gt_val) or is_in_list(gt_val, pred_val):
                         match = True
