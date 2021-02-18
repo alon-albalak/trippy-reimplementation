@@ -156,7 +156,7 @@ class Features(object):
         self.DB_labels = DB_labels
 
 
-def convert_examples_to_features(examples, slot_list, model_type, tokenizer, max_sequence_len, exact_reimplementation=False):
+def convert_examples_to_features(examples, slot_list, model_type, tokenizer, max_sequence_len):
     """converts a list of Example's into a list of Features"""
 
     if model_type == "bert":

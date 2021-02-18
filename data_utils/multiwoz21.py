@@ -152,6 +152,17 @@ def is_in_list(tokens, value):
             break
     return found
 
+def delex_utt(utt, values):
+    utt_norm = tokenize(utt)
+    for s, vals in values.items():
+        for v in vals:
+            if v != "none":
+                v_norm = tokenize(v)
+                v_len = len(v_norm)
+                for i in range(len(utt_norm) + 1 - v_len):
+                    if utt_norm[i : i + v_len] == v_norm:
+                        utt_norm[i : i + v_len] = ["[UNK]"] * v_len
+    return utt_norm    
 
 def check_slot_inform(value, inform_value, value_variations):
     # fuzzy matching for labelling informed slot values
@@ -197,7 +208,7 @@ def check_slot_referral(value, slot, seen_slots, value_variations):
     referred_slot = "none"
 
     # slots that cannot refer to other slots, also cannot be referred to
-    non_referrable_slots = ["hotel_stars", "hotel_internet", "hotel_parking"]
+    non_referrable_slots = ["hotel-stars", "hotel-internet", "hotel-parking"]
 
     if slot in non_referrable_slots:
         return referred_slot
@@ -271,6 +282,7 @@ def get_turn_sources_and_labels(
     value_variations,
     seen_slots,
     label_only_last_occurence,
+    single_source
 ):
     # Takes as input the value label (GT slot value)
     #   determines which sources contain the value
@@ -286,17 +298,32 @@ def get_turn_sources_and_labels(
         value_sources[source_dict[value_label]] = 1
 
     else:
+        # check if value is in user utterance
         in_usr, usr_pos = check_value_existence(value_label, usr_utterance_tokens, value_variations)
-        if "sys_utt" in source_dict:
+
+
+        if "sys_utt" not in source_dict:
             in_sys = False
         else:
-            in_sys, sys_pos = check_value_existence(value_label, sys_utterance_tokens, value_variations)
-        is_informed, informed_value = check_slot_inform(value_label, inform_value, value_variations)
-        referred_slot = check_slot_referral(value_label, slot, seen_slots, value_variations)
-        if "DB" in source_dict:
-            DB_label = [0]
+            # if we have system utterance as a value source, and 
+            # only if we either allow multiple sources, or have not found the value in user utterance
+            if not (single_source and in_usr):
+                in_sys, sys_pos = check_value_existence(value_label, sys_utterance_tokens, value_variations)
+
+        # only check if informed when we allow for multiple sources, or
+        #   if the value has not been found yet
+        if not (single_source and (in_usr or in_sys)):
+            is_informed, informed_value = check_slot_inform(value_label, inform_value, value_variations)
         else:
-            DB_label = check_DB(value_label, slot, value_variations, DB_values)
+            is_informed = False
+
+        if not (single_source and (in_usr or in_sys or is_informed)):
+            referred_slot = check_slot_referral(value_label, slot, seen_slots, value_variations)
+        
+        # if "DB" not in source_dict:
+        #     DB_label = [0]
+        # else:
+        #     DB_label = check_DB(value_label, slot, value_variations, DB_values)
 
         if in_usr:
             value_sources[source_dict["usr_utt"]] = 1
@@ -307,7 +334,7 @@ def get_turn_sources_and_labels(
                 for s, e in usr_pos:
                     usr_utterance_token_label[s:e] = [1] * (e - s)
 
-        if in_sys:
+        if in_sys and not ():
             value_sources[source_dict["sys_utt"]] = 1
             if label_only_last_occurence:
                 s, e = sys_pos[-1]
@@ -328,11 +355,14 @@ def get_turn_sources_and_labels(
 def load_multiwoz21_dataset(
     dataset_type="debugging",  # usually train/val/test
     label_value_repetitions=True,
-    label_only_last_occurence=True,  # whether we should label all(or only last) occurences of a label in usr and sys utterances
+    label_only_last_occurence=False,  # whether we should label all(or only last) occurences of a label in usr and sys utterances
+    single_source = False,
+    delexicalize_sys_utt=False,
     data_path="data/MULTIWOZ2.1",
     DB_file="",
-    sources=["none", "dontcare", "usr_utt", "sys_utt", "inform", "refer", "DB", "true", "false"],
+    sources=["none", "dontcare", "usr_utt", "sys_utt", "inform", "refer", "true", "false"],
     log_unpointable_values=False,
+    # exact_reimplementation=False
 ):
 
     dataset_file = os.path.join(data_path, f"{dataset_type}_dials.json")
@@ -394,9 +424,15 @@ def load_multiwoz21_dataset(
                 turn_itr += 1
 
             # if we want to delexicalize system utterances, do so here
-
-            # split the current turn utterance into tokens
-            utterance_token_list.append(tokenize(turn["text"]))
+            if delexicalize_sys_utt and is_system_utterance:
+                inform_dict = {slot: "none" for slot in slot_list}
+                for slot in slot_list:
+                    if (str(dialog_id), str(turn_itr), slot) in system_inform_dict:
+                        inform_dict[slot] = system_inform_dict[(str(dialog_id), str(turn_itr), slot)]
+                utterance_token_list.append(delex_utt(turn["text"], inform_dict))
+            else:
+                # split the current turn utterance into tokens
+                utterance_token_list.append(tokenize(turn["text"]))
 
             modified_slots = {}
 
@@ -441,7 +477,11 @@ def load_multiwoz21_dataset(
         hst_utterance_token_label_dict = {slot: [] for slot in slot_list}
         dialog_seen_slots_dict = {}  # dict of {slot: value_source} where we only have slots that have occured in the dialogue and value source
         dialog_seen_slots_value_dict = {slot: "none" for slot in slot_list}
-        dialog_state = {slot: [1] + [0] * (len(sources) - 1) for slot in slot_list}
+        if single_source:
+            dialogue_state = {slot: "none" for slot in slot_list}
+        else:
+            dialog_state = {slot: [1] + [0] * (len(sources) - 1) for slot in slot_list}
+
         for i in range(1, len(utterance_token_list) - 1, 2):
             value_sources_dict = {}
             inform_dict = {}
@@ -504,49 +544,102 @@ def load_multiwoz21_dataset(
                     value_variations,
                     new_dialog_seen_slots_value_dict,
                     label_only_last_occurence,
+                    single_source=single_source
                 )
                 DB_label_dict[slot] = DB_label
                 referral_dict[slot] = referred_slot
                 inform_dict[slot] = informed_value
+
+                if single_source:
+                    # If we only allow for a single source, and no source was found for this value, 
+                    # then we must manually set it to unpointable to handle later
+                    if sum(value_sources) == 1:
+                        class_type = sources[value_sources.index(1)]
+                    else:
+                        class_type = "unpointable"
+
+
+                # if the current value is the same for multiple slots, and is found in the current utterance, then
+                #       it is now ambiguous which value refers back to which slot, remove labels for these
+                if label_value_repetitions and slot in dialog_seen_slots_dict:
+                    if value_sources[source_dict["usr_utt"]] == 1 and list(new_dialog_seen_slots_value_dict.values()).count(value_label) > 1:
+                        value_sources[source_dict["usr_utt"]] = 0
+                        usr_utterance_token_label = [0 for _ in usr_utterance_token_label]
+                        if single_source:
+                            class_type = "none"
+
                 sys_utterance_token_label_dict[slot] = sys_utterance_token_label
                 usr_utterance_token_label_dict[slot] = usr_utterance_token_label
                 new_hst_utterance_token_label_dict[slot] = (
                     usr_utterance_token_label + sys_utterance_token_label + new_hst_utterance_token_label_dict[slot]
                 )
 
-                # in case a value is unpointable, set the value source label to none
-                # ALON TODO: Analyze where these unpointable values come from
-                #   number of unpointable values reduced from 11% of train data to 1.1% of train data
-                # some of these values are listed as multiple possible values in the dataset
-                #       eg. "kings college|hughes hall"
-                tot_samples += 1
-                if sum(value_sources) == 0 and slot in turn_modified_slots:
-                    if log_unpointable_values:
-                        logger.info(f"Unpointable value {value_label} in {guid} turn {i} slot {slot}")
-                    # as a backup, set the source to none, but still add it to the list of values seen
-                    value_sources[source_dict["none"]] = 1
-                    dialog_seen_slots_dict[slot] = value_sources
-                    new_dialog_seen_slots_value_dict[slot] = value_label
-                    # check if the value exists in history (but not in current turn)
-                    #   ~80% of unpointable values are in the dialogue history
-                    in_hst, _ = check_value_existence(value_label, hst_utterance_tokens, value_variations)
-                    if in_hst:
-                        unpointable_in_hst += 1
-                    else:
-                        unpointable_unknown += 1
-                # in case that the value was previously seen and not repeated in this turn, set the source of the value to "none"
-                elif sum(value_sources) == 0 and slot in dialog_seen_slots_dict:
-                    value_sources[source_dict["none"]] = 1
-                elif sum(value_sources) > 0 and value_sources[source_dict["none"]] == 0:
-                    dialog_seen_slots_dict[slot] = value_sources
-                    new_dialog_seen_slots_value_dict[slot] = value_label
+                if single_source:
+                    if class_type == "unpointable":
+                        if log_unpointable_values:
+                            logger.info(f"Unpointable value {value_label} in {guid} turn {i} slot {slot}")
+                        value_sources_dict[slot] = "none"
+                        referral_dict[slot] = "none"
 
-                elif sum(value_sources) == 1 and value_sources[source_dict["none"]] == 1:
-                    pass
+                        # check if the value exists in history (but not in current turn)
+                        #   ~80% of unpointable values are in the dialogue history
+                        in_hst, _ = check_value_existence(value_label, hst_utterance_tokens, value_variations)
+                        if in_hst:
+                            unpointable_in_hst += 1
+                        else:
+                            unpointable_unknown += 1
+                    elif (
+                        slot in dialog_seen_slots_dict
+                        and class_type == dialog_seen_slots_dict[slot]
+                        and class_type != "usr_utt"
+                        and class_type != "inform"
+                    ):
+                        value_sources_dict[slot] = "none"
+                        referral_dict[slot] = "none"
+                    else:
+                        value_sources_dict[slot] = class_type
+                        referral_dict[slot] = referred_slot
+
+                    if class_type != "none":
+                        dialog_seen_slots_dict[slot] = class_type
+                        new_dialog_seen_slots_value_dict[slot] = value_label
+                        new_dialog_state[slot] = class_type
+                        if class_type == "unpointable":
+                            new_dialog_state[slot] = "usr_utt"
                 else:
-                    logger.info(f"====== Unknown source of value in {guid}\tturn {i}\t{slot}")
-                new_dialog_state[slot] = value_sources
-                value_sources_dict[slot] = value_sources
+                    # in case a value is unpointable, set the value source label to none
+                    # ALON TODO: Analyze where these unpointable values come from
+                    #   number of unpointable values reduced from 11% of train data to 1.1% of train data
+                    # some of these values are listed as multiple possible values in the dataset
+                    #       eg. "kings college|hughes hall"
+                    tot_samples += 1
+                    if sum(value_sources) == 0 and slot in turn_modified_slots:
+                        if log_unpointable_values:
+                            logger.info(f"Unpointable value {value_label} in {guid} turn {i} slot {slot}")
+                        # as a backup, set the source to none, but still add it to the list of values seen
+                        value_sources[source_dict["none"]] = 1
+                        dialog_seen_slots_dict[slot] = value_sources
+                        new_dialog_seen_slots_value_dict[slot] = value_label
+                        # check if the value exists in history (but not in current turn)
+                        #   ~80% of unpointable values are in the dialogue history
+                        in_hst, _ = check_value_existence(value_label, hst_utterance_tokens, value_variations)
+                        if in_hst:
+                            unpointable_in_hst += 1
+                        else:
+                            unpointable_unknown += 1
+                    # in case that the value was previously seen and not repeated in this turn, set the source of the value to "none"
+                    elif sum(value_sources) == 0 and slot in dialog_seen_slots_dict:
+                        value_sources[source_dict["none"]] = 1
+                    elif sum(value_sources) > 0 and value_sources[source_dict["none"]] == 0:
+                        dialog_seen_slots_dict[slot] = value_sources
+                        new_dialog_seen_slots_value_dict[slot] = value_label
+
+                    elif sum(value_sources) == 1 and value_sources[source_dict["none"]] == 1:
+                        pass
+                    else:
+                        logger.info(f"====== Unknown source of value in {guid}\tturn {i}\t{slot}")
+                    new_dialog_state[slot] = value_sources
+                    value_sources_dict[slot] = value_sources
 
             data.append(
                 Example(

@@ -92,6 +92,9 @@ def parse_args():
     parser.add_argument("--DB_file", type=str, default="")
     parser.add_argument("--label_value_repetitions", type=bool, default=True)
     parser.add_argument("--label_only_last_occurence", action="store_true")
+    parser.add_argument("--single_source", action="store_true")
+    parser.add_argument("--delexicalize_sys_utt", action="store_true")
+    parser.add_argument("--single_token_label", action="store_true")
     parser.add_argument("--dataset_identifier", type=str, default="")
     parser.add_argument("--output_dir", type=str, default="")
 
@@ -108,6 +111,9 @@ def parse_args():
         setattr(args, "softgate", False)
         setattr(args, "label_value_repetitions", True)
         setattr(args, "label_only_last_occurence", True)
+        setattr(args, "single_source", True)
+        setattr(args, "delexicalize_sys_utt", True)
+        setattr(args, "single_token_label", True)
         global sources
         sources = ["none", "dontcare", "usr_utt", "true", "false", "refer", "inform"]
 
