@@ -284,7 +284,6 @@ def get_turn_sources_and_labels(
     value_variations,
     seen_slots,
     label_only_last_occurence,
-    exact_reimplementation,
 ):
     # Takes as input the value label (GT slot value)
     #   determines which sources contain the value
@@ -345,7 +344,7 @@ def get_turn_sources_and_labels(
 def load_multiwoz21_dataset(
     dataset_type="debugging",  # usually train/val/test
     label_value_repetitions=True,
-    label_only_last_occurence=True,  # whether we should label all(or only last) occurences of a label in usr and sys utterances
+    label_only_last_occurence=False,  # whether we should label all(or only last) occurences of a label in usr and sys utterances
     data_path="data/MULTIWOZ2.1",
     DB_file="",
     sources=["none", "dontcare", "usr_utt", "sys_utt", "inform", "refer", "DB", "true", "false"],
