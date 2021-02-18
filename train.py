@@ -21,10 +21,12 @@ logger = logging.getLogger(__name__)
 
 
 def set_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    logger.info(f"Setting seed to {seed}")
+    if seed != -1:
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        logger.info(f"Setting seed to {seed}")
+
 
 def batch_to_device(batch, device):
     batch_on_device = []

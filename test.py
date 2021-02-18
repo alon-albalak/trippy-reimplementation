@@ -1,6 +1,8 @@
 import logging
 import os
 import json
+import random
+import numpy as np
 from tqdm import tqdm
 
 import utils.utils
@@ -15,7 +17,11 @@ logger = logging.getLogger(__name__)
 
 
 def set_seed(seed):
-    torch.manual_seed(seed)
+    if seed != -1:
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        logger.info(f"Setting seed to {seed}")
 
 
 def batch_to_device(batch, device):
